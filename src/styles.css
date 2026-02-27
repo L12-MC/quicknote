@@ -1,0 +1,109 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@keyframes scalein {
+  from {
+    opacity: 0;
+    transform: scale(0.5);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+/* Developer-first defaults */
+
+html, body, #root {
+  height: 100%;
+}
+
+body {
+  @apply bg-zinc-950 text-zinc-100 antialiased;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+/* Smooth caret */
+textarea {
+  caret-color: #60a5fa;
+}
+
+/* Scrollbar (minimal dev aesthetic) */
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #27272a;
+  border-radius: 8px;
+}
+
+[contenteditable="true"] h1,
+[contenteditable="true"] h2,
+[contenteditable="true"] h3,
+[contenteditable="true"] h4,
+[contenteditable="true"] h5,
+[contenteditable="true"] h6 {
+  font-weight: 700;
+  margin: 0;
+}
+
+[contenteditable="true"] [data-heading-level] {
+  font-weight: 700;
+}
+
+[contenteditable="true"] h1 { font-size: 2rem; font-weight: 800; }
+[contenteditable="true"] h2 { font-size: 1.65rem; font-weight: 780; }
+[contenteditable="true"] h3 { font-size: 1.4rem; font-weight: 750; }
+[contenteditable="true"] h4 { font-size: 1.2rem; font-weight: 720; }
+[contenteditable="true"] h5 { font-size: 1.06rem; font-weight: 690; }
+[contenteditable="true"] h6 { font-size: 0.95rem; }
+
+[contenteditable="true"] [data-heading-level="1"] { font-size: 2rem; font-weight: 800; }
+[contenteditable="true"] [data-heading-level="2"] { font-size: 1.65rem; font-weight: 780; }
+[contenteditable="true"] [data-heading-level="3"] { font-size: 1.4rem; font-weight: 750; }
+[contenteditable="true"] [data-heading-level="4"] { font-size: 1.2rem; font-weight: 720; }
+[contenteditable="true"] [data-heading-level="5"] { font-size: 1.06rem; font-weight: 690; }
+[contenteditable="true"] [data-heading-level="6"] { font-size: 0.95rem; }
+
+[contenteditable="true"] ul,
+[contenteditable="true"] ol {
+  margin: 0;
+  padding-left: 1.1rem;
+}
+
+[contenteditable="true"] ul {
+  list-style-type: disc;
+  list-style-position: outside;
+}
+
+[contenteditable="true"] ul li::marker {
+  color: #ffffff;
+}
+
+[contenteditable="true"] li {
+  margin: 0;
+}
+
+.subtle-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(161, 161, 170, 0.28) transparent;
+}
+
+.subtle-scrollbar::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.subtle-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.subtle-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(161, 161, 170, 0.28);
+  border-radius: 9999px;
+}
+
+.subtle-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(161, 161, 170, 0.42);
+}

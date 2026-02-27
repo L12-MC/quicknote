@@ -1,0 +1,9 @@
+import React from "react";
+
+export default function App() {
+  return (
+    <div className="w-screen h-screen flex items-center justify-center bg-zinc-950 text-zinc-100 font-mono">
+      <h1 className="text-3xl">QuickNote Loaded!</h1>
+    </div>
+  );
+}
