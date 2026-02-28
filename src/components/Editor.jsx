@@ -5,20 +5,44 @@ import 'katex/dist/katex.min.css';
 import { highlight } from '../lib/shiki';
 import { marked } from 'marked';
 
-const BLOCK_REGEX = /(code|latex|link|video|image|file|md|markdown)\+block\{((?:\\}|[^}])*)\}/g;
+const BLOCK_REGEX = /(code|latex|link|video|image|file|checklist|md|markdown)\+block\{((?:\\}|[^}])*)\}/g;
+const BLOCK_NEWLINE_TOKEN = '__QN_BLOCK_NL__';
 
 function escapeBlockContent(value) {
-  return String(value || '').replace(/}/g, '\\}');
+  return String(value || '')
+    .replace(/\n/g, BLOCK_NEWLINE_TOKEN)
+    .replace(/}/g, '\\}');
 }
 
 function unescapeBlockContent(value) {
-  return String(value || '').replace(/\\}/g, '}');
+  return String(value || '')
+    .replace(/\\}/g, '}')
+    .replaceAll(BLOCK_NEWLINE_TOKEN, '\n');
 }
 
 function asHref(value) {
   if (!value) return '#';
   if (/^https?:\/\//i.test(value)) return value;
   return `https://${value}`;
+}
+
+function parseChecklistLine(line) {
+  const match = String(line || '').match(/^[-*]\s*\[( |x|X)\]\s*(.*)$/);
+  if (!match) {
+    return {
+      checked: false,
+      text: String(line || '').trim()
+    };
+  }
+
+  return {
+    checked: /x/i.test(match[1] || ''),
+    text: match[2] || ''
+  };
+}
+
+function formatChecklistLine({ checked, text }) {
+  return `- [${checked ? 'x' : ' '}] ${text || ''}`;
 }
 
 function createBlockChip(type, value) {
@@ -87,6 +111,62 @@ function createBlockChip(type, value) {
     return chip;
   }
 
+  if (type === 'checklist') {
+    chip.className = 'inline-flex items-center align-middle max-w-full mx-0.5 rounded-md border border-zinc-700 bg-zinc-900 text-zinc-100 text-xs overflow-hidden';
+    const checklistWrap = document.createElement('span');
+    checklistWrap.className = 'max-w-[420px] block p-2';
+
+    const lines = String(value || '').split('\n').map((line) => line.trim()).filter(Boolean);
+    const rows = lines.length > 0 ? lines : ['- [ ] checklist item'];
+
+    rows.forEach((line, rowIndex) => {
+      const row = document.createElement('div');
+      row.className = 'flex items-center gap-2';
+      const parsed = parseChecklistLine(line);
+      const input = document.createElement('input');
+      input.type = 'checkbox';
+      input.checked = parsed.checked;
+      const label = document.createElement('span');
+      label.textContent = parsed.text;
+      label.style.whiteSpace = 'nowrap';
+      label.style.overflow = 'hidden';
+      label.style.textOverflow = 'ellipsis';
+      label.style.maxWidth = '360px';
+
+      input.addEventListener('change', () => {
+        const hostChip = input.closest('[data-block-type="checklist"]');
+        if (!hostChip) return;
+
+        const currentContent = hostChip.getAttribute('data-block-content') || '';
+        const currentLines = String(currentContent)
+          .split('\n')
+          .map((item) => item.trim())
+          .filter(Boolean);
+
+        const normalizedRows = currentLines.length > 0 ? currentLines : ['- [ ] checklist item'];
+        const targetIndex = rowIndex;
+        if (targetIndex < 0 || targetIndex >= normalizedRows.length) return;
+
+        const updatedRows = normalizedRows.map((item, index) => {
+          if (index !== targetIndex) return item;
+          const current = parseChecklistLine(item);
+          return formatChecklistLine({ checked: input.checked, text: current.text });
+        });
+
+        const nextContent = updatedRows.join('\n');
+        hostChip.setAttribute('data-block-content', nextContent);
+        hostChip.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+
+      row.appendChild(input);
+      row.appendChild(label);
+      checklistWrap.appendChild(row);
+    });
+
+    chip.appendChild(checklistWrap);
+    return chip;
+  }
+
   if (type === 'md' || type === 'markdown') {
     chip.className = 'inline-flex items-center align-middle max-w-full mx-0.5 rounded-md border border-zinc-700 bg-zinc-900 text-zinc-100 text-xs overflow-hidden';
     const mdWrap = document.createElement('span');
@@ -120,16 +200,48 @@ function parseInlineNodes(text) {
   let lastIndex = 0;
   let match;
 
+  const parseInlineMarkdownText = (value) => {
+    const source = String(value || '');
+    const inlineNodes = [];
+    const inlineRegex = /(\*\*|__)([^\n]+?)\1|(?<!\*)\*([^*\n]+)\*(?!\*)|(?<!_)_([^_\n]+)_(?!_)/g;
+    let cursor = 0;
+    let token;
+
+    while ((token = inlineRegex.exec(source)) !== null) {
+      if (token.index > cursor) {
+        inlineNodes.push(document.createTextNode(source.slice(cursor, token.index)));
+      }
+
+      if (token[2] != null) {
+        const strong = document.createElement('strong');
+        strong.appendChild(document.createTextNode(token[2] || ''));
+        inlineNodes.push(strong);
+      } else {
+        const em = document.createElement('em');
+        em.appendChild(document.createTextNode(token[3] || token[4] || ''));
+        inlineNodes.push(em);
+      }
+
+      cursor = inlineRegex.lastIndex;
+    }
+
+    if (cursor < source.length) {
+      inlineNodes.push(document.createTextNode(source.slice(cursor)));
+    }
+
+    return inlineNodes;
+  };
+
   while ((match = BLOCK_REGEX.exec(text)) !== null) {
     if (match.index > lastIndex) {
-      nodes.push(document.createTextNode(text.slice(lastIndex, match.index)));
+      parseInlineMarkdownText(text.slice(lastIndex, match.index)).forEach((node) => nodes.push(node));
     }
     nodes.push(createBlockChip(match[1], unescapeBlockContent(match[2])));
     lastIndex = BLOCK_REGEX.lastIndex;
   }
 
   if (lastIndex < text.length) {
-    nodes.push(document.createTextNode(text.slice(lastIndex)));
+    parseInlineMarkdownText(text.slice(lastIndex)).forEach((node) => nodes.push(node));
   }
 
   return nodes;
@@ -137,7 +249,11 @@ function parseInlineNodes(text) {
 
 function parseContentToNodes(content) {
   const normalized = String(content || '').replace(/\r\n?/g, '\n');
-  const lines = normalized.split('\n');
+  const safeContent = normalized.replace(BLOCK_REGEX, (_full, type, blockContent) => {
+    const escapedNewlines = String(blockContent || '').replace(/\n/g, BLOCK_NEWLINE_TOKEN);
+    return `${type}+block{${escapedNewlines}}`;
+  });
+  const lines = safeContent.split('\n');
   const nodes = [];
   let index = 0;
 
@@ -249,6 +365,20 @@ function serializeEditor(root) {
       return;
     }
 
+    if (el.tagName === 'STRONG' || el.tagName === 'B') {
+      result += '**';
+      el.childNodes.forEach((child) => walk(child, context));
+      result += '**';
+      return;
+    }
+
+    if (el.tagName === 'EM' || el.tagName === 'I') {
+      result += '_';
+      el.childNodes.forEach((child) => walk(child, context));
+      result += '_';
+      return;
+    }
+
     const headingLevelAttr = el.getAttribute('data-heading-level');
     if (/^H[1-6]$/.test(el.tagName) || headingLevelAttr) {
       const level = headingLevelAttr ? Number(headingLevelAttr) : Number(el.tagName[1]);
@@ -353,6 +483,38 @@ function setCaretInTextNode(textNode, offset) {
   range.collapse(true);
   selection.removeAllRanges();
   selection.addRange(range);
+}
+
+function getCaretCharacterOffset(root) {
+  const selection = window.getSelection();
+  if (!selection || selection.rangeCount === 0 || !selection.isCollapsed || !root) return null;
+  const range = selection.getRangeAt(0);
+  if (!root.contains(range.startContainer)) return null;
+
+  const probe = document.createRange();
+  probe.selectNodeContents(root);
+  probe.setEnd(range.startContainer, range.startOffset);
+  return probe.toString().length;
+}
+
+function setCaretByCharacterOffset(root, offset) {
+  if (!root || offset == null) return;
+
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  let remaining = Math.max(0, offset);
+  let node = walker.nextNode();
+
+  while (node) {
+    const len = (node.textContent || '').length;
+    if (remaining <= len) {
+      setCaretInTextNode(node, remaining);
+      return;
+    }
+    remaining -= len;
+    node = walker.nextNode();
+  }
+
+  setCaretAtEnd(root);
 }
 
 function normalizeHeadingElement(blockEl, level, textValue = '', caretToEnd = true) {
@@ -486,11 +648,19 @@ export default function Editor({ content, setContent }) {
       const hasHeadingMarkdown = /(^|\n)#{1,6}\s+/.test(content || '');
       const hasHeadingHtml = /<h[1-6]>[\s\S]*<\/h[1-6]>/i.test(content || '');
       const hasHeadingNodes = Boolean(editor.querySelector('h1,h2,h3,h4,h5,h6,[data-heading-level]'));
-      if ((!hasHeadingMarkdown && !hasHeadingHtml) || hasHeadingNodes) return;
+      const hasRawInlineMarkdown = /(\*\*|__)[^\n]+?\1|(?<!\*)\*[^*\n]+\*(?!\*)|(?<!_)_[^_\n]+_(?!_)/.test(editor.textContent || '');
+      if (((!hasHeadingMarkdown && !hasHeadingHtml) || hasHeadingNodes) && !hasRawInlineMarkdown) return;
     }
+
+    const caretOffset = getCaretCharacterOffset(editor);
 
     editor.innerHTML = '';
     parseContentToNodes(content).forEach((node) => editor.appendChild(node));
+    if (caretOffset != null) {
+      requestAnimationFrame(() => {
+        setCaretByCharacterOffset(editor, caretOffset);
+      });
+    }
     initializedRef.current = true;
   }, [content]);
 
@@ -519,7 +689,7 @@ export default function Editor({ content, setContent }) {
     if (!editor) return;
 
     const before = (textNode.textContent || '').slice(0, offset);
-    const match = before.match(/:(code|latex|link|image|video|file|md|markdown)$/);
+    const match = before.match(/:(code|latex|link|image|video|file|checklist|md|markdown)$/);
     if (!match) return;
 
     const command = `:${type}`;
@@ -557,7 +727,13 @@ export default function Editor({ content, setContent }) {
 
     if (e.ctrlKey && (e.key === 'r' || e.key === 'R')) {
       e.preventDefault();
-      window.dispatchEvent(new CustomEvent('quicknote:rename-note'));
+      window.dispatchEvent(new CustomEvent('quicknote:open-rename'));
+      return;
+    }
+
+    if (e.key === 'F2') {
+      e.preventDefault();
+      window.dispatchEvent(new CustomEvent('quicknote:open-rename'));
       return;
     }
 
@@ -588,8 +764,44 @@ export default function Editor({ content, setContent }) {
     }
 
     if (e.key === ' ' && range.collapsed) {
-      const blockEl = ensureBlockElementAtCaret(editor, selection);
-      const preText = getTextBeforeCaretInBlock(selection, blockEl).trim();
+      const container = range.startContainer;
+      const offset = range.startOffset;
+
+      if (container.nodeType === Node.TEXT_NODE) {
+        const arrowSymbolMap = {
+          ':uparrow': '↑',
+          ':downarrow': '↓',
+          ':leftarrow': '←',
+          ':rightarrow': '→'
+        };
+
+        const textNode = container;
+        const textBefore = (textNode.textContent || '').slice(0, offset);
+        const arrowMatch = textBefore.match(/:(uparrow|downarrow|leftarrow|rightarrow)$/);
+
+        if (arrowMatch) {
+          e.preventDefault();
+          const token = arrowMatch[0];
+          const symbol = arrowSymbolMap[token] || token;
+          const tokenStart = offset - token.length;
+          const fullText = textNode.textContent || '';
+          textNode.textContent = `${fullText.slice(0, tokenStart)}${symbol} ${fullText.slice(offset)}`;
+          setCaretInTextNode(textNode, tokenStart + symbol.length + 1);
+          syncContent();
+          return;
+        }
+      }
+
+      let blockEl = getClosestBlockElement(range.startContainer, editor);
+      let preText = blockEl ? getTextBeforeCaretInBlock(selection, blockEl).trim() : '';
+
+      const isMarkdownTrigger = /^(#{1,6}|[-*+]|\d+\.)$/.test(preText);
+      if (!isMarkdownTrigger) return;
+
+      if (!blockEl) {
+        blockEl = ensureBlockElementAtCaret(editor, selection);
+        preText = getTextBeforeCaretInBlock(selection, blockEl).trim();
+      }
 
       const headingMatch = preText.match(/^#{1,6}$/);
       const unorderedMatch = preText.match(/^[-*+]$/);
@@ -641,7 +853,7 @@ export default function Editor({ content, setContent }) {
 
       if (container.nodeType === Node.TEXT_NODE) {
         const textBefore = (container.textContent || '').slice(0, offset);
-        const match = textBefore.match(/:(code|latex|link|image|video|file|md|markdown)$/);
+        const match = textBefore.match(/:(code|latex|link|image|video|file|checklist|md|markdown)$/);
         if (match) {
           e.preventDefault();
           openBlockEditorFromCommand(match[1], container, offset);
@@ -763,7 +975,7 @@ export default function Editor({ content, setContent }) {
     <div className="h-full relative overflow-hidden">
       {placeholderVisible && (
         <div className="absolute top-4 left-4 text-zinc-500 text-sm pointer-events-none">
-          Write your note... use :code :latex :link :image :video :file :md then Enter/Space
+          Write your note... use :code :latex :link :image :video :file :checklist :md then Enter/Space
         </div>
       )}
 
@@ -836,6 +1048,11 @@ export default function Editor({ content, setContent }) {
 
           if (id === 'exit') {
             window.dispatchEvent(new CustomEvent('quicknote:go-menu'));
+            return;
+          }
+
+          if (id === 'rename') {
+            window.dispatchEvent(new CustomEvent('quicknote:open-rename'));
           }
         }}
       />

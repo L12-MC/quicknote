@@ -3,12 +3,13 @@ import { useEffect, useRef, useState } from 'react';
 
 const COMMANDS = [
   { id: 'exit', label: 'exit', hint: 'Go to notes menu' },
+  { id: 'rename', label: 'rename', hint: 'Rename current note' },
   { id: 'copyall', label: 'copyall', hint: 'Copy entire note' },
   { id: 'exportmd', label: 'exportmd', hint: 'Export note as markdown' },
   { id: 'importmd', label: 'importmd', hint: 'Import markdown into note' }
 ];
 
-export default function CommandPalette({ open, setOpen, onCommand }) {
+export default function CommandPalette({ open, setOpen, onCommand, commands = COMMANDS, title = 'Commands' }) {
   const inputRef = useRef(null);
   const [query, setQuery] = useState('');
 
@@ -39,7 +40,10 @@ export default function CommandPalette({ open, setOpen, onCommand }) {
       return;
     }
 
-    const match = COMMANDS.find((command) => command.label === value);
+    const exactMatch = commands.find((command) => command.label === value);
+    const prefixMatch = commands.find((command) => command.label.startsWith(value));
+    const looseMatch = commands.find((command) => command.label.includes(value));
+    const match = exactMatch || prefixMatch || looseMatch;
     if (!match) {
       event.preventDefault();
       return;
@@ -67,13 +71,13 @@ export default function CommandPalette({ open, setOpen, onCommand }) {
         <Command.List className="max-h-60 overflow-y-auto">
           <Command.Empty>No results found.</Command.Empty>
 
-          <Command.Group heading="Commands">
-            {COMMANDS.map((command) => (
+          <Command.Group heading={title}>
+            {commands.map((command) => (
               <Command.Item
                 key={command.id}
                 value={`${command.label} ${command.hint}`}
                 onSelect={() => runCommand(command.id)}
-                className="p-2 hover:bg-zinc-700 cursor-pointer rounded flex items-center justify-between"
+                className="p-2 hover:bg-zinc-700 data-[selected=true]:bg-zinc-700 data-[selected=true]:text-zinc-100 cursor-pointer rounded flex items-center justify-between transition-colors duration-100"
               >
                 <span>{command.label}</span>
                 <span className="text-xs text-zinc-400">{command.hint}</span>

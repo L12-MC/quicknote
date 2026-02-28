@@ -2,14 +2,87 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  --qn-bg: #09090b;
+  --qn-surface: #18181b;
+  --qn-surface-2: #27272a;
+  --qn-text: #f4f4f5;
+  --qn-text-soft: #d4d4d8;
+  --qn-muted: #a1a1aa;
+  --qn-border: #3f3f46;
+  --qn-accent: #60a5fa;
+  --qn-accent-soft: #93c5fd;
+  --qn-fast: 110ms;
+  --qn-smooth: 170ms;
+}
+
+:root[data-theme='light'] {
+  --qn-bg: #f4f4f5;
+  --qn-surface: #ffffff;
+  --qn-surface-2: #e4e4e7;
+  --qn-text: #18181b;
+  --qn-text-soft: #27272a;
+  --qn-muted: #52525b;
+  --qn-border: #a1a1aa;
+  --qn-accent: #2563eb;
+  --qn-accent-soft: #3b82f6;
+}
+
+:root[data-theme='soulless'] {
+  --qn-bg: #1a1f26;
+  --qn-surface: #242b34;
+  --qn-surface-2: #313b47;
+  --qn-text: #dce2ea;
+  --qn-text-soft: #c5cdd8;
+  --qn-muted: #93a0b2;
+  --qn-border: #4a5568;
+  --qn-accent: #5b79a0;
+  --qn-accent-soft: #7b95b7;
+}
+
+:root[data-theme='hacker'] {
+  --qn-bg: #000000;
+  --qn-surface: #061106;
+  --qn-surface-2: #0a1a0a;
+  --qn-text: #afffaf;
+  --qn-text-soft: #7aff7a;
+  --qn-muted: #4bcf4b;
+  --qn-border: #1f6e1f;
+  --qn-accent: #39ff14;
+  --qn-accent-soft: #6dff53;
+}
+
+:root[data-theme='nightsky'] {
+  --qn-bg: #121a29;
+  --qn-surface: #1a2436;
+  --qn-surface-2: #22304a;
+  --qn-text: #d9e7ff;
+  --qn-text-soft: #b6caec;
+  --qn-muted: #8da7cf;
+  --qn-border: #2e3e5e;
+  --qn-accent: #3e9af0;
+  --qn-accent-soft: #69b0f3;
+}
+
 @keyframes scalein {
   from {
     opacity: 0;
-    transform: scale(0.5);
+    transform: scale(0.96);
   }
   to {
     opacity: 1;
     transform: scale(1);
+  }
+}
+
+@keyframes fadeup {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
   }
 }
 /* Developer-first defaults */
@@ -19,23 +92,31 @@ html, body, #root {
 }
 
 body {
-  @apply bg-zinc-950 text-zinc-100 antialiased;
+  @apply antialiased;
+  background: var(--qn-bg);
+  color: var(--qn-text);
   font-family: 'JetBrains Mono', monospace;
+}
+
+#root {
+  animation: fadeup var(--qn-smooth) cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 /* Smooth caret */
 textarea {
-  caret-color: #60a5fa;
+  caret-color: var(--qn-accent);
 }
 
 /* Scrollbar (minimal dev aesthetic) */
 ::-webkit-scrollbar {
   width: 8px;
+  border-color: transparent;
 }
 
 ::-webkit-scrollbar-thumb {
   background: #27272a;
   border-radius: 8px;
+  border-color: transparent;
 }
 
 [contenteditable="true"] h1,
@@ -78,7 +159,7 @@ textarea {
 }
 
 [contenteditable="true"] ul li::marker {
-  color: #ffffff;
+  color: var(--qn-text);
 }
 
 [contenteditable="true"] li {
@@ -106,4 +187,79 @@ textarea {
 
 .subtle-scrollbar::-webkit-scrollbar-thumb:hover {
   background: rgba(161, 161, 170, 0.42);
+}
+
+.bg-zinc-950 { background-color: var(--qn-bg) !important; }
+.bg-zinc-900 { background-color: var(--qn-surface) !important; }
+.bg-zinc-800 { background-color: var(--qn-surface-2) !important; }
+.bg-zinc-900\/50 { background-color: color-mix(in srgb, var(--qn-surface) 50%, transparent) !important; }
+
+.text-zinc-100 { color: var(--qn-text) !important; }
+.text-zinc-200,
+.text-zinc-300,
+.text-zinc-400 { color: var(--qn-text-soft) !important; }
+.text-zinc-500 { color: var(--qn-muted) !important; }
+
+.border-zinc-700,
+.border-zinc-800 { border-color: var(--qn-border) !important; }
+
+.hover\:bg-zinc-700:hover,
+.hover\:bg-zinc-800:hover,
+.hover\:bg-zinc-900:hover { background-color: var(--qn-surface-2) !important; }
+
+.text-blue-300,
+.text-blue-400 { color: var(--qn-accent) !important; }
+.hover\:text-blue-300:hover,
+.hover\:text-blue-400:hover { color: var(--qn-accent-soft) !important; }
+
+button,
+a,
+input,
+textarea,
+[contenteditable='true'],
+[cmdk-item],
+[cmdk-input],
+[cmdk-dialog] {
+  transition:
+    background-color var(--qn-fast) ease,
+    color var(--qn-fast) ease,
+    border-color var(--qn-fast) ease,
+    opacity var(--qn-fast) ease,
+    transform var(--qn-fast) ease;
+}
+
+[cmdk-item][data-selected='true'] {
+  background-color: var(--qn-surface-2) !important;
+  color: var(--qn-text) !important;
+}
+
+[cmdk-item][data-selected='true'] .text-zinc-400 {
+  color: var(--qn-accent) !important;
+}
+
+button:hover,
+[cmdk-item]:hover {
+  transform: scale(1.01);
+}
+
+button:active,
+[cmdk-item]:active {
+  transform: scale(0.995);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #root {
+    animation: none;
+  }
+
+  button,
+  a,
+  input,
+  textarea,
+  [contenteditable='true'],
+  [cmdk-item],
+  [cmdk-input],
+  [cmdk-dialog] {
+    transition: none;
+  }
 }

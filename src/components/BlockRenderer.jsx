@@ -64,5 +64,26 @@ export default function BlockRenderer({ block }) {
     );
   }
 
+  if (block.type === 'checklist') {
+    const lines = String(block.content || '').split('\n').map((line) => line.trim()).filter(Boolean);
+    const rows = lines.length > 0 ? lines : ['- [ ] checklist item'];
+
+    return (
+      <div className="p-4 bg-zinc-900/50 rounded-2xl text-sm space-y-2">
+        {rows.map((line, index) => {
+          const match = line.match(/^[-*]\s*\[( |x|X)\]\s*(.*)$/);
+          const checked = Boolean(match && /x/i.test(match[1] || ''));
+          const text = match ? (match[2] || '') : line;
+          return (
+            <label key={`${line}-${index}`} className="flex items-center gap-2 opacity-90">
+              <input type="checkbox" disabled checked={checked} />
+              <span>{text}</span>
+            </label>
+          );
+        })}
+      </div>
+    );
+  }
+
   return null;
 }
