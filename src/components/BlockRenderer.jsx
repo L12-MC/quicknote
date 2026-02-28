@@ -85,5 +85,13 @@ export default function BlockRenderer({ block }) {
     );
   }
 
+  if (block.type === 'separator') {
+    return (
+      <div className="py-2">
+        <hr className="border-zinc-700 opacity-70" />
+      </div>
+    );
+  }
+
   return null;
 }

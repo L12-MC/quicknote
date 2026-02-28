@@ -1,5 +1,5 @@
 export function parseBlockInput(text) {
-  const regex = /(code|latex|link|video|image|file|checklist)\+block\{([\s\S]*?)\}$/;
+  const regex = /(code|latex|link|video|image|file|checklist|separator)\+block\{([\s\S]*?)\}$/;
   const match = text.match(regex);
   if (!match) return null;
 
@@ -11,7 +11,7 @@ export function parseBlockInput(text) {
 
 // Parse entire content and split into segments (text and blocks)
 export function parseContent(content) {
-  const blockRegex = /(code|latex|link|video|image|file|checklist)\+block\{([^\}]*)\}/g;
+  const blockRegex = /(code|latex|link|video|image|file|checklist|separator)\+block\{([^\}]*)\}/g;
   const segments = [];
   let lastIndex = 0;
   let match;
@@ -48,6 +48,6 @@ export function parseContent(content) {
 
 // Detect if user typed :blocktype pattern
 export function detectBlockCommand(text) {
-  const match = text.match(/:(code|latex|link|video|image|file|checklist)$/);
+  const match = text.match(/:(code|latex|link|video|image|file|checklist|seperator|separator)$/);
   return match ? match[1] : null;
 }

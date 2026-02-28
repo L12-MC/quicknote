@@ -5,7 +5,7 @@ import 'katex/dist/katex.min.css';
 import { highlight } from '../lib/shiki';
 import { marked } from 'marked';
 
-const BLOCK_REGEX = /(code|latex|link|video|image|file|checklist|md|markdown)\+block\{((?:\\}|[^}])*)\}/g;
+const BLOCK_REGEX = /(code|latex|link|video|image|file|checklist|separator|md|markdown)\+block\{((?:\\}|[^}])*)\}/g;
 const BLOCK_NEWLINE_TOKEN = '__QN_BLOCK_NL__';
 
 function escapeBlockContent(value) {
@@ -164,6 +164,14 @@ function createBlockChip(type, value) {
     });
 
     chip.appendChild(checklistWrap);
+    return chip;
+  }
+
+  if (type === 'separator') {
+    chip.className = 'inline-flex items-center align-middle w-full my-1 p-0 border-0 bg-transparent';
+    const line = document.createElement('span');
+    line.className = 'block w-full border-t border-zinc-700 opacity-70';
+    chip.appendChild(line);
     return chip;
   }
 
@@ -688,6 +696,28 @@ export default function Editor({ content, setContent }) {
     const editor = editorRef.current;
     if (!editor) return;
 
+    if (type === 'separator') {
+      const before = (textNode.textContent || '').slice(0, offset);
+      const separatorMatch = before.match(/:(seperator|separator)$/);
+      if (!separatorMatch) return;
+
+      const command = separatorMatch[0];
+      const commandStart = offset - command.length;
+      textNode.textContent = (textNode.textContent || '').slice(0, commandStart) + (textNode.textContent || '').slice(offset);
+
+      const selection = window.getSelection();
+      if (!selection) return;
+      const range = document.createRange();
+      range.setStart(textNode, commandStart);
+      range.collapse(true);
+
+      const chip = createBlockChip('separator', '');
+      range.insertNode(chip);
+      setCaretAfterNode(chip);
+      syncContent();
+      return;
+    }
+
     const before = (textNode.textContent || '').slice(0, offset);
     const match = before.match(/:(code|latex|link|image|video|file|checklist|md|markdown)$/);
     if (!match) return;
@@ -853,6 +883,13 @@ export default function Editor({ content, setContent }) {
 
       if (container.nodeType === Node.TEXT_NODE) {
         const textBefore = (container.textContent || '').slice(0, offset);
+        const separatorMatch = textBefore.match(/:(seperator|separator)$/);
+        if (separatorMatch) {
+          e.preventDefault();
+          openBlockEditorFromCommand('separator', container, offset);
+          return;
+        }
+
         const match = textBefore.match(/:(code|latex|link|image|video|file|checklist|md|markdown)$/);
         if (match) {
           e.preventDefault();
@@ -975,7 +1012,7 @@ export default function Editor({ content, setContent }) {
     <div className="h-full relative overflow-hidden">
       {placeholderVisible && (
         <div className="absolute top-4 left-4 text-zinc-500 text-sm pointer-events-none">
-          Write your note... use :code :latex :link :image :video :file :checklist :md then Enter/Space
+          Write your note... use :code :latex :link :image :video :file :checklist :seperator :md then Enter/Space
         </div>
       )}
 
