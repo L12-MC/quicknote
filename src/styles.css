@@ -67,13 +67,23 @@
 @keyframes scalein {
   from {
     opacity: 0;
-    transform: scale(0.96);
+    transform: scale(0.7);
   }
   to {
     opacity: 1;
     transform: scale(1);
   }
 }
+
+@keyframes fadein {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
 
 @keyframes fadeup {
   from {
@@ -165,6 +175,12 @@ textarea {
 [contenteditable="true"] li {
   margin: 0;
 }
+
+.note-selected {
+  background-color: var(--qn-surface-2) !important;
+}
+
+
 
 .subtle-scrollbar {
   scrollbar-width: thin;

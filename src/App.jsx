@@ -1,8 +1,11 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { invoke } from '@tauri-apps/api/core';
+import { getCurrentWindow } from '@tauri-apps/api/window';
 import Editor from './components/Editor';
 import CommandPalette from './components/CommandPalette';
 import { initHighlighter } from './lib/shiki';
 import { loadNotesFromDisk, saveNotesToDisk } from './lib/storage';
+import { event } from '@tauri-apps/api';
 
 const BUILTIN_THEME_OPTIONS = [
   { id: 'dark', label: 'Dark' },
@@ -16,13 +19,24 @@ const CUSTOM_THEME_STORAGE_KEY = 'quicknote-custom-theme';
 const CUSTOM_THEME_KEYS = ['bg', 'surface', 'surface2', 'text', 'textSoft', 'muted', 'border', 'accent', 'accentSoft'];
 
 const MENU_COMMANDS = [
-  { id: 'settheme', label: 'settheme', hint: 'Choose app theme' },
   { id: 'newnote', label: 'newnote', hint: 'Create a new note' },
-  { id: 'deleteall', label: 'deleteall', hint: 'Delete all notes' }
+  { id: 'quit', label: 'quit', hint: 'Close QuickNote' },
+  { id: 'deleteall', label: 'deleteall', hint: 'Delete all notes' },
+  { id: 'settheme', label: 'settheme', hint: 'Choose app theme' }
 ];
+
+function focusEditor() {
+  setTimeout(() => {
+    
+  }, 10);
+}
+
+
+
 
 export default function App() {
   const [notes, setNotes] = useState([{ id: 'note-1', title: 'Untitled Note', content: '' }]);
+  const notesRef = useRef(notes); // ADDED: Ref to hold the latest notes
   const [activeNoteId, setActiveNoteId] = useState('note-1');
   const [view, setView] = useState('editor');
   const [isReady, setIsReady] = useState(false);
@@ -30,6 +44,8 @@ export default function App() {
   const [renameOpen, setRenameOpen] = useState(false);
   const [renameValue, setRenameValue] = useState('');
   const [menuCmdOpen, setMenuCmdOpen] = useState(false);
+  const [isHidden, setIsHidden] = useState(false);
+  const [menuSelectedIndex, setMenuSelectedIndex] = useState(0);
   const [theme, setTheme] = useState(() => localStorage.getItem('quicknote-theme') || 'dark');
   const [themePickerOpen, setThemePickerOpen] = useState(false);
   const [customTheme, setCustomTheme] = useState(() => {
@@ -44,8 +60,28 @@ export default function App() {
     }
   });
 
+  const showCursor = () => {
+    setIsHidden(false);
+  };
+
+  const hideCursor = () => {
+    setIsHidden(true);
+  };
+
   const renameInputRef = useRef(null);
   const themeInputRef = useRef(null);
+
+
+  useEffect(() => {
+    window.addEventListener("quicknote:show-cursor", showCursor);
+    window.addEventListener("quicknote:hide-cursor", hideCursor);
+    return () => {
+      window.removeEventListener("quicknote:show-cursor", showCursor);
+      window.removeEventListener("quicknote:hide-cursor", hideCursor);
+    };
+  }, []);
+  
+  const lastMenuOpenTime = useRef(0);
 
   const themeOptions = customTheme
     ? [...BUILTIN_THEME_OPTIONS, { id: 'custom', label: customTheme.name || 'Custom' }]
@@ -198,18 +234,35 @@ export default function App() {
 
   useEffect(() => {
     const init = async () => {
+      const freshId = `note-${Date.now()}`;
+      const freshNote = { id: freshId, title: 'Untitled Note', content: '' };
+
       try {
         const storedNotes = await loadNotesFromDisk();
-        const freshId = `note-${Date.now()}`;
-        const freshNote = { id: freshId, title: 'Untitled Note', content: '' };
         const mergedNotes = [freshNote, ...storedNotes];
         setNotes(mergedNotes);
         setActiveNoteId(freshId);
-        setHasLoadedNotes(true);
-        await initHighlighter();
-        setIsReady(true);
       } catch (error) {
-        console.error("Initialization failed:", error);
+        // Keep app usable even if note loading fails.
+        console.error('Failed to load notes from disk:', error);
+        setNotes([freshNote]);
+        setActiveNoteId(freshId);
+      }
+
+      setHasLoadedNotes(true);
+
+      try {
+        // Avoid blocking app startup forever if highlighter init stalls.
+        await Promise.race([
+          initHighlighter(),
+          new Promise((_, reject) => {
+            setTimeout(() => reject(new Error('Highlighter init timed out')), 5000);
+          })
+        ]);
+      } catch (error) {
+        console.error('Highlighter initialization failed. Continuing without syntax highlighting.', error);
+      } finally {
+        setIsReady(true);
       }
     };
     init();
@@ -226,6 +279,8 @@ export default function App() {
   useEffect(() => {
     const openMenu = () => {
       setMenuCmdOpen(false);
+      setMenuSelectedIndex(0);
+      lastMenuOpenTime.current = Date.now();
       setNotes((prev) => {
         const active = prev.find((note) => note.id === activeNoteId);
         if (!active || shouldPersistNote(active)) {
@@ -274,9 +329,42 @@ export default function App() {
   useEffect(() => {
     const handleMenuShortcuts = (event) => {
       if (view !== 'menu') return;
+      if (menuCmdOpen || themePickerOpen) return;
+
+      // Cooldown to prevent accidental double-triggers when switching views
+      if (Date.now() - lastMenuOpenTime.current < 400) return;
+
       if (event.ctrlKey && event.code === 'Space') {
         event.preventDefault();
         setMenuCmdOpen((value) => !value);
+        return;
+      }
+
+      if (event.key === 'ArrowDown' || event.key === 'j') {
+        event.preventDefault();
+        setMenuSelectedIndex((prev) => Math.min(prev + 1, notes.length - 1));
+      } else if (event.key === 'ArrowUp' || event.key === 'k') {
+        event.preventDefault();
+        setMenuSelectedIndex((prev) => Math.max(prev - 1, 0));
+      } else if (event.key === 'Enter') {
+        event.preventDefault();
+        const selectedNote = notes[menuSelectedIndex];
+        if (selectedNote) {
+          setActiveNoteId(selectedNote.id);
+          setView('editor');
+        }
+      } else if (event.key === 'Delete' || (event.key === 'd' && !event.ctrlKey && !event.metaKey)) {
+        event.preventDefault();
+        const selectedNote = notes[menuSelectedIndex];
+        if (selectedNote) {
+          deleteNote(selectedNote.id);
+          // Selection adjustment happens naturally because notes.length changes
+          // but we might need to clamp it if we deleted the last item
+          setMenuSelectedIndex((prev) => Math.min(prev, Math.max(0, notes.length - 2)));
+        }
+      } else if (event.key === 'n' && !event.ctrlKey && !event.metaKey) {
+        event.preventDefault();
+        createNote();
       }
     };
 
@@ -284,16 +372,20 @@ export default function App() {
     return () => {
       window.removeEventListener('keydown', handleMenuShortcuts);
     };
-  }, [view]);
+  }, [view, menuCmdOpen, themePickerOpen, notes, menuSelectedIndex]);
 
   useEffect(() => {
-    if (!renameOpen) return;
-    requestAnimationFrame(() => {
-      const input = renameInputRef.current;
-      if (!input) return;
-      input.focus();
-      input.setSelectionRange(0, input.value.length);
-    });
+    if (renameOpen) {
+      window.dispatchEvent(new CustomEvent('quicknote:hide-cursor'));
+      requestAnimationFrame(() => {
+        const input = renameInputRef.current;
+        if (!input) return;
+        input.focus();
+        input.setSelectionRange(0, input.value.length);
+      });
+    } else {
+      window.dispatchEvent(new CustomEvent('quicknote:show-cursor'));
+    }
   }, [renameOpen]);
 
   const submitRename = () => {
@@ -310,6 +402,7 @@ export default function App() {
 
   if (view === 'menu') {
     return (
+      <div style={{ cursor: isHidden ? 'none' : 'auto', height: '100vh' }}>
       <div className="w-screen h-screen bg-zinc-950 text-zinc-100 font-mono p-4">
         <div className="h-full border border-transparent rounded-m p-4 flex flex-col gap-3">
           <div className='flex items-center justify-between'>
@@ -326,10 +419,13 @@ export default function App() {
             </button>
           </div>
           <div className="flex-1 overflow-y-auto subtle-scrollbar space-y-2">
-            {notes.map((note) => (
+            {notes.map((note, index) => (
               <div
                 key={note.id}
-                className="w-full text-left p-2 rounded border border-zinc-800 hover:bg-zinc-900"
+                onClick={() => setMenuSelectedIndex(index)}
+                className={`w-full text-left p-2 rounded border transition-colors ${
+                  index === menuSelectedIndex ? 'border-zinc-700 bg-zinc-900' : 'border-zinc-800 hover:bg-zinc-900'
+                }`}
               >
                 <div className="flex items-start justify-between gap-2">
                   <button
@@ -346,7 +442,10 @@ export default function App() {
                   </button>
 
                   <button
-                    onClick={() => deleteNote(note.id)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      deleteNote(note.id);
+                    }}
                     className="text-[10px] px-2 py-1 rounded border border-zinc-700 text-zinc-300 hover:bg-zinc-800"
                     title="Delete note"
                   >
@@ -357,13 +456,14 @@ export default function App() {
             ))}
           </div>
         </div>
+        </div>
 
         <CommandPalette
           open={menuCmdOpen}
           setOpen={setMenuCmdOpen}
           commands={MENU_COMMANDS}
           title="General"
-          onCommand={(id) => {
+          onCommand={async (id) => {
             if (id === 'newnote') {
               createNote();
               return;
@@ -373,11 +473,28 @@ export default function App() {
               setNotes([]);
               setActiveNoteId(null);
               setMenuCmdOpen(false);
+              event.preventDefault();
               return;
             }
 
             if (id === 'settheme') {
               setThemePickerOpen(true);
+              event.preventDefault();
+              return;
+            }
+
+            if (id === 'quit') {
+              try {
+                await invoke('quit_app');
+              } catch (invokeError) {
+                console.error('quit_app command failed, falling back to close:', invokeError);
+                try {
+                  await getCurrentWindow().close();
+                } catch (error) {
+                  console.error('Failed to close Tauri window:', error);
+                  window.close();
+                }
+              }
             }
           }}
         />
@@ -396,6 +513,8 @@ export default function App() {
             if (!id.startsWith('theme:')) return;
             const themeId = id.replace('theme:', '');
             setTheme(themeId);
+            event.preventDefault();
+
           }}
         />
 
@@ -427,7 +546,7 @@ export default function App() {
   }
 
   return (
-    <div className="w-screen h-screen bg-zinc-950 text-zinc-100 font-mono p-0">
+    <div style={{ cursor: isHidden ? 'none' : 'auto' }} className="w-screen h-screen bg-zinc-950 text-zinc-100 font-mono p-0">
       <div className="h-full">
         <Editor content={activeNote?.content || ''} setContent={setActiveContent} />
       </div>
@@ -444,10 +563,14 @@ export default function App() {
                 if (event.key === 'Enter') {
                   event.preventDefault();
                   submitRename();
+                  // Focus the caret on the editor
+                  focusEditor();
                 }
                 if (event.key === 'Escape') {
                   event.preventDefault();
                   setRenameOpen(false);
+                  // Focus the caret on the editor
+                  focusEditor();
                 }
               }}
               className="w-full bg-zinc-800 text-zinc-100 border border-zinc-700 p-2 rounded-md outline-none"

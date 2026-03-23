@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import CommandPalette from './CommandPalette';
 import katex from 'katex';
 import 'katex/dist/katex.min.css';
-import { highlight } from '../lib/shiki';
+import { highlight, isHighlighterReady } from '../lib/shiki';
 import { marked } from 'marked';
 
 const BLOCK_REGEX = /(code|latex|link|video|image|file|checklist|separator|md|markdown)\+block\{((?:\\}|[^}])*)\}/g;
@@ -45,6 +45,28 @@ function formatChecklistLine({ checked, text }) {
   return `- [${checked ? 'x' : ' '}] ${text || ''}`;
 }
 
+function renderMarkdownWithHighlighting(markdownText) {
+  const renderer = new marked.Renderer();
+
+  renderer.code = (...args) => {
+    let code = '';
+    let lang = '';
+
+    const [first, second] = args;
+    if (first && typeof first === 'object') {
+      code = first.text || '';
+      lang = first.lang || '';
+    } else {
+      code = first || '';
+      lang = second || '';
+    }
+
+    return highlight(code, lang || undefined);
+  };
+
+  return marked.parse(markdownText || '', { gfm: true, breaks: true, renderer });
+}
+
 function createBlockChip(type, value) {
   const chip = document.createElement('span');
   chip.setAttribute('data-block-type', type);
@@ -58,7 +80,7 @@ function createBlockChip(type, value) {
     chip.className = 'inline-flex items-center align-middle max-w-full mx-0.5 rounded-md border border-zinc-700 bg-zinc-900 text-zinc-100 text-xs overflow-hidden';
     const rendered = document.createElement('span');
     rendered.className = 'max-w-[420px] block';
-    rendered.innerHTML = highlight(value || '', 'javascript');
+    rendered.innerHTML = highlight(value || '');
     const pre = rendered.querySelector('pre');
     if (pre) {
       pre.style.margin = '0';
@@ -179,9 +201,17 @@ function createBlockChip(type, value) {
     chip.className = 'inline-flex items-center align-middle max-w-full mx-0.5 rounded-md border border-zinc-700 bg-zinc-900 text-zinc-100 text-xs overflow-hidden';
     const mdWrap = document.createElement('span');
     mdWrap.className = 'max-w-[480px] block p-2';
-    mdWrap.innerHTML = marked.parse(value || '', { gfm: true, breaks: true });
+    mdWrap.innerHTML = renderMarkdownWithHighlighting(value || '');
     mdWrap.querySelectorAll('h1,h2,h3,h4,h5,h6,p,ul,ol,table,pre,blockquote').forEach((node) => {
       node.style.margin = '0 0 6px 0';
+    });
+    mdWrap.querySelectorAll('pre code').forEach((node) => {
+      node.style.whiteSpace = 'pre';
+    });
+    mdWrap.querySelectorAll('pre.shiki').forEach((node) => {
+      node.style.borderRadius = '8px';
+      node.style.padding = '8px 10px';
+      node.style.overflowX = 'auto';
     });
     mdWrap.querySelectorAll('ul,ol').forEach((node) => {
       node.style.paddingLeft = '16px';
@@ -611,6 +641,8 @@ export default function Editor({ content, setContent }) {
   const blockInputRef = useRef(null);
   const markerRef = useRef(null);
   const initializedRef = useRef(false);
+  const forceNextRenderRef = useRef(false);
+  const [highlighterRenderTick, setHighlighterRenderTick] = useState(0);
 
   const focusEditorAtEnd = () => {
     const editor = editorRef.current;
@@ -624,6 +656,12 @@ export default function Editor({ content, setContent }) {
     selection.removeAllRanges();
     selection.addRange(range);
   };
+
+    useEffect(() => {
+    const editor = editorRef.current;
+    if (!editor) return;
+
+    window.addEventListener("quicknote:focus-editor", focusEditorAtEnd)})
 
   const normalizeCaretAfterBlock = () => {
     const editor = editorRef.current;
@@ -648,11 +686,28 @@ export default function Editor({ content, setContent }) {
   }, [content, isFocused, editingBlock]);
 
   useEffect(() => {
+    const onHighlighterReady = () => {
+      forceNextRenderRef.current = true;
+      setHighlighterRenderTick((tick) => tick + 1);
+    };
+
+    window.addEventListener('quicknote:highlighter-ready', onHighlighterReady);
+
+    if (isHighlighterReady()) {
+      onHighlighterReady();
+    }
+
+    return () => {
+      window.removeEventListener('quicknote:highlighter-ready', onHighlighterReady);
+    };
+  }, []);
+
+  useEffect(() => {
     const editor = editorRef.current;
     if (!editor) return;
 
     const current = serializeEditor(editor);
-    if (initializedRef.current && current === content) {
+    if (!forceNextRenderRef.current && initializedRef.current && current === content) {
       const hasHeadingMarkdown = /(^|\n)#{1,6}\s+/.test(content || '');
       const hasHeadingHtml = /<h[1-6]>[\s\S]*<\/h[1-6]>/i.test(content || '');
       const hasHeadingNodes = Boolean(editor.querySelector('h1,h2,h3,h4,h5,h6,[data-heading-level]'));
@@ -669,12 +724,17 @@ export default function Editor({ content, setContent }) {
         setCaretByCharacterOffset(editor, caretOffset);
       });
     }
+
+    forceNextRenderRef.current = false;
     initializedRef.current = true;
-  }, [content]);
+  }, [content, highlighterRenderTick]);
 
   useEffect(() => {
     if (editingBlock && blockInputRef.current) {
       blockInputRef.current.focus();
+      window.dispatchEvent(new CustomEvent('quicknote:hide-cursor'));
+    } else if (!editingBlock) {
+      window.dispatchEvent(new CustomEvent('quicknote:show-cursor'));
     }
   }, [editingBlock]);
 
@@ -958,14 +1018,19 @@ export default function Editor({ content, setContent }) {
     }
 
     if (e.key === 'Escape') {
-      e.preventDefault();
-      const marker = markerRef.current;
-      if (marker && marker.parentNode) marker.remove();
-      markerRef.current = null;
-      setEditingBlock(null);
-      setBlockContent('');
-      syncContent();
-      requestAnimationFrame(() => editorRef.current?.focus());
+      if (editingBlock) {
+        e.preventDefault();
+        const marker = markerRef.current;
+        if (marker && marker.parentNode) marker.remove();
+        markerRef.current = null;
+        setEditingBlock(null);
+        setBlockContent('');
+        syncContent();
+        requestAnimationFrame(() => editorRef.current?.focus());
+      } else if (!cmdOpen) {
+        e.preventDefault();
+        window.dispatchEvent(new CustomEvent('quicknote:go-menu'));
+      }
       return;
     }
 
@@ -1012,7 +1077,7 @@ export default function Editor({ content, setContent }) {
     <div className="h-full relative overflow-hidden">
       {placeholderVisible && (
         <div className="absolute top-4 left-4 text-zinc-500 text-sm pointer-events-none">
-          Write your note... use :code :latex :link :image :video :file :checklist :seperator :md then Enter/Space
+          Write your note...
         </div>
       )}
 
@@ -1030,7 +1095,8 @@ export default function Editor({ content, setContent }) {
       />
 
       {editingBlock && (
-        <div className="absolute inset-0 bg-black/45 flex items-center justify-center p-3 animate-[scalein_190ms_cubic-bezier(0.22,1,0.36,1)]">
+        <div className='fixed inset-0 flex items-center justify-center p-4 animate-[fadein_190ms_linear] bg-black/50'>
+        <div className="absolute inset-0 flex items-center justify-center p-6 animate-[scalein_190ms_cubic-bezier(0.22,1,0.36,1)]">
           <div className="w-full h-full rounded-xl border border-zinc-700 bg-zinc-900 p-3 flex flex-col">
             <div className="text-xs text-zinc-400 mb-2 flex justify-between">
               <span>{editingBlock.toUpperCase()} BLOCK</span>
@@ -1045,6 +1111,7 @@ export default function Editor({ content, setContent }) {
               placeholder={`Enter ${editingBlock} content...`}
             />
           </div>
+        </div>
         </div>
       )}
 
