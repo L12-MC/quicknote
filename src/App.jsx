@@ -327,6 +327,24 @@ export default function App() {
   }, [notes, activeNoteId, renameValue]);
 
   useEffect(() => {
+    const handleGlobalShortcuts = (event) => {
+      if (event.ctrlKey && event.code === 'KeyW') {
+        event.preventDefault();
+        if (event.shiftKey) {
+          window.dispatchEvent(new CustomEvent('quicknote:go-menu'));
+        } else {
+          getCurrentWindow().close();
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleGlobalShortcuts);
+    return () => {
+      window.removeEventListener('keydown', handleGlobalShortcuts);
+    };
+  }, []);
+
+  useEffect(() => {
     const handleMenuShortcuts = (event) => {
       if (view !== 'menu') return;
       if (menuCmdOpen || themePickerOpen) return;
@@ -403,10 +421,10 @@ export default function App() {
   if (view === 'menu') {
     return (
       <div style={{ cursor: isHidden ? 'none' : 'auto', height: '100vh' }}>
-      <div className="w-screen h-screen bg-zinc-950 text-zinc-100 font-mono p-4">
+      <div className="w-screen h-screen bg-zinc-950 text-zinc-100 font-[Syne] p-4">
         <div className="h-full border border-transparent rounded-m p-4 flex flex-col gap-3">
           <div className='flex items-center justify-between'>
-            <h1 className='text-xl text-zinc-300 justify-center'>QuickNote</h1>
+            <h1 className='text-xl text-zinc-300 justify-center font-[Mulish]'>QuickNote</h1>
             <div className="text-xs text-zinc-500">Theme: {themeOptions.find((option) => option.id === theme)?.label || 'Dark'}</div>
           </div>
           <div className="flex items-center justify-between">
@@ -423,7 +441,7 @@ export default function App() {
               <div
                 key={note.id}
                 onClick={() => setMenuSelectedIndex(index)}
-                className={`w-full text-left p-2 rounded border transition-colors ${
+                className={`w-full text-left p-2 rounded border transition-colors animate-[fadeup_200ms_${index * 10}ms_cubic-bezier(0.16,1,0.3,1)] ${
                   index === menuSelectedIndex ? 'border-zinc-700 bg-zinc-900' : 'border-zinc-800 hover:bg-zinc-900'
                 }`}
               >

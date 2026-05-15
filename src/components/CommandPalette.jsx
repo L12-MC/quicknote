@@ -90,18 +90,18 @@ export default function CommandPalette({ open, setOpen, onCommand, commands = CO
       onOpenChange={setOpen}
       className="bg-black/0"
     >
-      <div className='fixed inset-0 flex items-center justify-center p-4 animate-[fadein_190ms_linear] bg-black/50'>
-      <div className="fixed inset-0 flex items-center justify-center p-4 animate-[scalein_190ms_cubic-bezier(0.22,1,0.36,1)] z-50 overflow-hidden">
-      <Command value={activeValue} onValueChange={setActiveValue} className="bg-zinc-900 border border-zinc-700 text-white p-4 rounded-2xl w-full max-w-sm shadow-lg overflow-hidden">
+      <div className='fixed inset-0 flex items-center justify-center p-4 animate-[fadein_160ms_linear] bg-black/40 backdrop-blur-[2px]'>
+      <div className="fixed inset-0 flex items-center justify-center p-4 animate-[scalein_320ms_cubic-bezier(0.16,1,0.3,1)] z-50 overflow-hidden">
+      <Command value={activeValue} onValueChange={setActiveValue} className="bg-zinc-900 border font-[Syne] border-zinc-800 text-white p-4 rounded-[32px] w-full max-w-sm shadow-lg overflow-hidden">
         <Command.Input
           ref={inputRef}
           value={query}
           onValueChange={setQuery}
           onKeyDown={handleInputKeyDown}
           placeholder="Type a command or search..."
-          className="bg-zinc-800 text-zinc-100 border border-zinc-700 p-2 mb-2 outline-none w-full rounded-md"
+          className="bg-zinc-800 text-zinc-100 border-none p-3 mb-2 outline-none w-full rounded-2xl" 
         />
-        <Command.List className="max-h-60 overflow-y-auto overflow-x-hidden">
+        <Command.List className="max-h-60 overflow-y-auto p-2 overflow-x-hidden">
           <Command.Empty>No results found.</Command.Empty>
 
           <Command.Group heading={title}>
@@ -110,7 +110,7 @@ export default function CommandPalette({ open, setOpen, onCommand, commands = CO
                 key={command.id}
                 value={command.id}
                 onSelect={() => runCommand(command.id)}
-                className="p-2 data-[selected=true]:bg-zinc-800 data-[selected=true]:text-zinc-100 rounded flex items-center justify-between transition-colors duration-100 pointer-events-none"
+                className="p-2 data-[selected=true]:bg-zinc-800 data-[selected=true]:text-zinc-100 font-['JetBrains_Mono'] rounded-xl flex items-center justify-between transition-colors duration-100 pointer-events-none"
               >
                 <div className="flex flex-col">
                   <span className="text-sm">{command.label}</span>

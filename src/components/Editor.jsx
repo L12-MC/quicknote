@@ -3,6 +3,7 @@ import CommandPalette from './CommandPalette';
 import katex from 'katex';
 import 'katex/dist/katex.min.css';
 import { highlight, isHighlighterReady } from '../lib/shiki';
+import { getCurrentWindow } from '@tauri-apps/api/window';
 import { marked } from 'marked';
 
 const BLOCK_REGEX = /(code|latex|link|video|image|file|checklist|separator|md|markdown)\+block\{((?:\\}|[^}])*)\}/g;
@@ -72,12 +73,12 @@ function createBlockChip(type, value) {
   chip.setAttribute('data-block-type', type);
   chip.setAttribute('data-block-content', value);
   chip.setAttribute('contenteditable', 'false');
-  chip.className = 'inline-flex items-center align-middle max-w-full px-2 py-0.5 mx-0.5 rounded-md border border-zinc-700 bg-zinc-800 text-zinc-100 text-xs whitespace-nowrap overflow-hidden';
+  chip.className = 'inline-flex items-center align-middle max-w-full px-2 py-0.5 mx-0.5 rounded-md border border-zinc-800 bg-zinc-800 text-zinc-100 text-xs whitespace-nowrap overflow-hidden';
 
   const preview = value.replace(/\s+/g, ' ').trim().slice(0, 56);
 
   if (type === 'code') {
-    chip.className = 'inline-flex items-center align-middle max-w-full mx-0.5 rounded-md border border-zinc-700 bg-zinc-900 text-zinc-100 text-xs overflow-hidden';
+    chip.className = 'inline-flex items-center align-middle max-w-full mx-0.5 rounded-md border border-zinc-800 bg-zinc-900 text-zinc-100 text-xs overflow-hidden';
     const rendered = document.createElement('span');
     rendered.className = 'max-w-[420px] block';
     rendered.innerHTML = highlight(value || '');
@@ -110,7 +111,7 @@ function createBlockChip(type, value) {
   }
 
   if (type === 'latex') {
-    chip.className = 'inline-flex items-center align-middle max-w-full px-2 py-1 mx-0.5 rounded-md border border-zinc-700 bg-zinc-900 text-zinc-100 text-xs overflow-hidden';
+    chip.className = 'inline-flex items-center align-middle max-w-full px-2 py-1 mx-0.5 rounded-md border border-zinc-800 bg-zinc-900 text-zinc-100 text-xs overflow-hidden';
     const latexWrap = document.createElement('span');
     latexWrap.className = 'max-w-[420px] overflow-hidden';
     latexWrap.innerHTML = katex.renderToString(value || '', { throwOnError: false });
@@ -134,7 +135,7 @@ function createBlockChip(type, value) {
   }
 
   if (type === 'checklist') {
-    chip.className = 'inline-flex items-center align-middle max-w-full mx-0.5 rounded-md border border-zinc-700 bg-zinc-900 text-zinc-100 text-xs overflow-hidden';
+    chip.className = 'inline-flex items-center align-middle max-w-full mx-0.5 rounded-md border border-zinc-800 bg-zinc-900 text-zinc-100 text-xs overflow-hidden';
     const checklistWrap = document.createElement('span');
     checklistWrap.className = 'max-w-[420px] block p-2';
 
@@ -192,13 +193,13 @@ function createBlockChip(type, value) {
   if (type === 'separator') {
     chip.className = 'inline-flex items-center align-middle w-full my-1 p-0 border-0 bg-transparent';
     const line = document.createElement('span');
-    line.className = 'block w-full border-t border-zinc-700 opacity-70';
+    line.className = 'block w-full border-t border-zinc-800 opacity-70';
     chip.appendChild(line);
     return chip;
   }
 
   if (type === 'md' || type === 'markdown') {
-    chip.className = 'inline-flex items-center align-middle max-w-full mx-0.5 rounded-md border border-zinc-700 bg-zinc-900 text-zinc-100 text-xs overflow-hidden';
+    chip.className = 'inline-flex items-center align-middle max-w-full mx-0.5 rounded-md border border-zinc-800 bg-zinc-900 text-zinc-100 text-xs overflow-hidden';
     const mdWrap = document.createElement('span');
     mdWrap.className = 'max-w-[480px] block p-2';
     mdWrap.innerHTML = renderMarkdownWithHighlighting(value || '');
@@ -808,6 +809,11 @@ export default function Editor({ content, setContent }) {
     syncContent();
   };
 
+  const closeWindow = async () => {
+    const appWindow = getCurrentWindow();
+    await appWindow.close();
+  };
+
   const handleEditorKeyDown = (e) => {
     if (e.ctrlKey && e.code === 'Space') {
       e.preventDefault();
@@ -1075,12 +1081,9 @@ export default function Editor({ content, setContent }) {
 
   return (
     <div className="h-full relative overflow-hidden">
-      {placeholderVisible && (
-        <div className="absolute top-4 left-4 text-zinc-500 text-sm pointer-events-none">
+        <div className={`absolute top-6 left-6 text-zinc-500 text-sm pointer-events-none transition-all duration-250 ${placeholderVisible ? 'opacity-100' : 'opacity-0'}`}>
           Write your note...
         </div>
-      )}
-
       <div
         ref={editorRef}
         contentEditable
@@ -1091,14 +1094,14 @@ export default function Editor({ content, setContent }) {
         onInput={handleEditorInput}
         onFocus={() => setIsFocused(true)}
         onBlur={() => setIsFocused(false)}
-        className="w-full h-full overflow-y-auto subtle-scrollbar outline-none text-sm leading-relaxed p-4 whitespace-pre-wrap break-words"
+        className="w-full h-full overflow-y-auto subtle-scrollbar outline-none text-sm leading-relaxed p-6 whitespace-pre-wrap break-words"
       />
 
       {editingBlock && (
         <div className='fixed inset-0 flex items-center justify-center p-4 animate-[fadein_190ms_linear] bg-black/50'>
-        <div className="absolute inset-0 flex items-center justify-center p-6 animate-[scalein_190ms_cubic-bezier(0.22,1,0.36,1)]">
-          <div className="w-full h-full rounded-xl border border-zinc-700 bg-zinc-900 p-3 flex flex-col">
-            <div className="text-xs text-zinc-400 mb-2 flex justify-between">
+        <div className="absolute inset-0 flex items-center justify-center p-6 animate-[scalein_320ms_cubic-bezier(0.16,1,0.3,1)]">
+          <div className="w-full h-full rounded-[32px] border border-zinc-800 bg-zinc-900 p-6 flex flex-col">
+            <div className="text-xs text-zinc-400/70 mb-2 flex justify-between">
               <span>{editingBlock.toUpperCase()} BLOCK</span>
               <span>Tab to insert · Esc to cancel</span>
             </div>
