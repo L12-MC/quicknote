@@ -4,10 +4,61 @@ import katex from 'katex';
 import 'katex/dist/katex.min.css';
 import { highlight, isHighlighterReady } from '../lib/shiki';
 import { getCurrentWindow } from '@tauri-apps/api/window';
+import { convertFileSrc } from '@tauri-apps/api/core';
 import { marked } from 'marked';
+import { copyAssetToNoteFolder } from '../lib/storage';
 
-const BLOCK_REGEX = /(code|latex|link|video|image|file|checklist|separator|md|markdown)\+block\{((?:\\}|[^}])*)\}/g;
+import { IoTrash } from 'react-icons/io5';
+
+const BLOCK_REGEX = /(code|math|latex|graph|pie|link|video|image|file|checklist|separator|md|markdown)\+block\{((?:\\}|[^}])*)\}/g;
 const BLOCK_NEWLINE_TOKEN = '__QN_BLOCK_NL__';
+
+const HELP_COMMANDS = [
+  { id: 'keybindings', label: 'keybindings', hint: 'Show keyboard shortcuts' },
+  { id: 'cheats', label: 'cheats', hint: 'Show markdown and block keywords' },
+  { id: 'credits', label: 'credits', hint: 'Show app credits and contributors' }
+];
+
+const CREDIT_COMMANDS = [
+  { id: 'credit-author', label: 'Author', hint: 'Labros Karatasios' },
+  { id: 'credit-tech', label: 'Built with', hint: 'React, Tauri, Vite' },
+  { id: 'credit-libraries', label: 'Libraries', hint: 'Shiki, KaTeX, Marked' },
+  { id: 'credit-version', label: 'Version', hint: '0.1.1' }
+];
+
+const KEYBINDING_COMMANDS = [
+  { id: 'noop-ctrl-space', label: 'ctrl+space command palette' },
+  { id: 'noop-escape', label: 'esc back or cancel' },
+  { id: 'noop-j', label: 'j / arrowdown next item' },
+  { id: 'noop-k', label: 'k / arrowup previous item' },
+  { id: 'noop-enter', label: 'enter select item' },
+  { id: 'noop-rename', label: 'f2 or ctrl+r rename note' },
+  { id: 'noop-settings', label: 'ctrl+, settings' },
+  { id: 'noop-menu', label: 'ctrl+shift+w notes menu' },
+  { id: 'noop-close', label: 'ctrl+w close window' },
+  { id: 'noop-block', label: 'tab insert block' }
+];
+
+const CHEAT_COMMANDS = [
+  { id: 'cheat-h1', label: '# heading 1', insert: '# ' },
+  { id: 'cheat-h2', label: '## heading 2', insert: '## ' },
+  { id: 'cheat-bold', label: '**bold**', insert: '**bold**' },
+  { id: 'cheat-italic', label: '_italic_', insert: '_italic_' },
+  { id: 'cheat-list', label: '- list item', insert: '- ' },
+  { id: 'cheat-ordered', label: '1. ordered item', insert: '1. ' },
+  { id: 'cheat-wikilink', label: '[[note title]] note link', insert: '[[note title]]' },
+  { id: 'cheat-code', label: ':code code block', insert: ':code ' },
+  { id: 'cheat-math', label: ':math math block', insert: ':math ' },
+  { id: 'cheat-graph', label: ':graph y=f(x) graph', insert: ':graph ' },
+  { id: 'cheat-pie', label: ':pie Work:40, Life:35, Sleep:25', insert: ':pie Work:40, Life:35, Sleep:25' },
+  { id: 'cheat-link', label: ':link link block', insert: ':link ' },
+  { id: 'cheat-image', label: ':image image block', insert: ':image ' },
+  { id: 'cheat-file', label: ':file file embed', insert: ':file ' },
+  { id: 'cheat-checklist', label: ':checklist checklist block', insert: ':checklist ' },
+  { id: 'cheat-md', label: ':md markdown block', insert: ':md ' },
+  { id: 'cheat-separator', label: ':separator separator block', insert: ':separator ' },
+  { id: 'cheat-quote', label: '> quote', insert: '> ' }
+];
 
 function escapeBlockContent(value) {
   return String(value || '')
@@ -23,8 +74,175 @@ function unescapeBlockContent(value) {
 
 function asHref(value) {
   if (!value) return '#';
+  if (/^(asset|file|data|blob):/i.test(value)) return value;
   if (/^https?:\/\//i.test(value)) return value;
   return `https://${value}`;
+}
+
+function asAssetSrc(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  if (/^(https?|asset|file|data|blob):/i.test(raw)) return raw;
+  return convertFileSrc(raw);
+}
+
+function getFileKind(data) {
+  const mime = String(data?.mime || '').toLowerCase();
+  const title = String(data?.title || data?.src || '').toLowerCase();
+  const extension = title.includes('.') ? title.split('.').pop() : '';
+
+  if (mime.startsWith('image/') || ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'avif'].includes(extension)) return 'image';
+  if (mime.startsWith('video/') || ['mp4', 'webm', 'mov', 'mkv', 'avi'].includes(extension)) return 'video';
+  if (mime.startsWith('audio/') || ['mp3', 'wav', 'flac', 'ogg', 'm4a'].includes(extension)) return 'audio';
+  if (['exe', 'msi', 'app', 'bat', 'cmd'].includes(extension)) return 'exe';
+  if (['md', 'txt', 'pdf', 'doc', 'docx', 'rtf'].includes(extension)) return 'document';
+  return 'file';
+}
+
+function createFileGlyph(kind) {
+  const glyph = document.createElement('span');
+  glyph.className = 'qn-file-embed-glyph';
+  const labels = {
+    image: 'IMG',
+    video: 'VID',
+    audio: 'AUD',
+    exe: 'EXE',
+    document: 'DOC',
+    file: 'FILE'
+  };
+  glyph.textContent = labels[kind] || 'FILE';
+  return glyph;
+}
+
+function parseBlockData(value, fallbackType = '') {
+  const raw = String(value || '');
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === 'object') return parsed;
+  } catch {
+    // Old blocks are plain strings.
+  }
+  return { src: raw, title: raw.split(/[\\/]/).pop() || fallbackType || 'attachment' };
+}
+
+function formatBytes(size) {
+  const value = Number(size || 0);
+  if (!value) return '';
+  if (value < 1024) return `${value} B`;
+  if (value < 1024 * 1024) return `${Math.round(value / 1024)} KB`;
+  return `${(value / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function escapeSvgText(value) {
+  return String(value || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function normalizeMathExpression(value) {
+  return String(value || '')
+    .replace(/^y\s*=\s*/i, '')
+    .replace(/\^/g, '**')
+    .replace(/\b(sin|cos|tan|sqrt|abs|log|exp|pow|min|max|floor|ceil|round|PI|E)\b/g, 'Math.$1');
+}
+
+function evaluateGraphExpression(expression, x) {
+  const normalized = normalizeMathExpression(expression);
+  if (!/^[\d\s+\-*/().,xMathPIEabscdefgilmnopqrstuw]+$/.test(normalized)) return null;
+  try {
+    const result = Function('x', `"use strict"; return (${normalized});`)(x);
+    return Number.isFinite(result) ? result : null;
+  } catch {
+    return null;
+  }
+}
+
+function createGraphSvg(value) {
+  const width = 320;
+  const height = 150;
+  const padding = 10;
+  const points = [];
+
+  for (let i = 0; i <= 80; i += 1) {
+    const x = -10 + (20 * i) / 80;
+    const y = evaluateGraphExpression(value, x);
+    if (y == null) continue;
+    points.push({ x, y });
+  }
+
+  const valid = points.filter((point) => Math.abs(point.y) < 1000);
+  const yValues = valid.map((point) => point.y);
+  const minY = Math.min(-1, ...yValues);
+  const maxY = Math.max(1, ...yValues);
+  const spanY = maxY - minY || 1;
+  const mapX = (x) => padding + ((x + 10) / 20) * (width - padding * 2);
+  const mapY = (y) => height - padding - ((y - minY) / spanY) * (height - padding * 2);
+  const polyline = valid.map((point) => `${mapX(point.x).toFixed(1)},${mapY(point.y).toFixed(1)}`).join(' ');
+  const zeroY = mapY(0);
+  const zeroX = mapX(0);
+
+  return `
+    <svg class="qn-chart-svg" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}" role="img" aria-label="graph">
+      <rect width="${width}" height="${height}" rx="8" fill="#18181b"/>
+      <line x1="${padding}" y1="${zeroY}" x2="${width - padding}" y2="${zeroY}" stroke="#3f3f46" stroke-width="1"/>
+      <line x1="${zeroX}" y1="${padding}" x2="${zeroX}" y2="${height - padding}" stroke="#3f3f46" stroke-width="1"/>
+      <polyline fill="none" stroke="#60a5fa" stroke-width="2" points="${polyline}"/>
+      <text x="12" y="18" fill="#a1a1aa" font-size="11">y=${String(value || '').replace(/^y\s*=\s*/i, '')}</text>
+    </svg>
+  `;
+}
+
+function createPieSvg(value) {
+  const items = String(value || '')
+    .split(/[,;\n]/)
+    .map((item, index) => {
+      const [label, rawAmount] = item.includes(':') ? item.split(':') : [`Slice ${index + 1}`, item];
+      return { label: label.trim(), amount: Number(rawAmount) };
+    })
+    .filter((item) => item.label && Number.isFinite(item.amount) && item.amount > 0);
+  const slices = items.length ? items : [{ label: 'A', amount: 50 }, { label: 'B', amount: 50 }];
+  const total = slices.reduce((sum, item) => sum + item.amount, 0);
+  const colors = ['#60a5fa', '#f472b6', '#34d399', '#fbbf24', '#a78bfa'];
+  const centerX = 54;
+  const centerY = 54;
+  const radius = 48;
+  let currentAngle = -90;
+  const pointOnCircle = (angle) => {
+    const radians = (Math.PI / 180) * angle;
+    return {
+      x: centerX + radius * Math.cos(radians),
+      y: centerY + radius * Math.sin(radians)
+    };
+  };
+  const paths = slices.map((item, index) => {
+    const sweep = (item.amount / total) * 360;
+    const start = pointOnCircle(currentAngle);
+    const end = pointOnCircle(currentAngle + sweep);
+    const largeArc = sweep > 180 ? 1 : 0;
+    const path = sweep >= 359.99
+      ? `<circle cx="${centerX}" cy="${centerY}" r="${radius}" fill="${colors[index % colors.length]}"/>`
+      : `<path d="M ${centerX} ${centerY} L ${start.x.toFixed(2)} ${start.y.toFixed(2)} A ${radius} ${radius} 0 ${largeArc} 1 ${end.x.toFixed(2)} ${end.y.toFixed(2)} Z" fill="${colors[index % colors.length]}"/>`;
+    currentAngle += sweep;
+    return path;
+  }).join('');
+  const labels = slices.slice(0, 5).map((item, index) => {
+    const percent = Math.round((item.amount / total) * 100);
+    return `
+      <rect x="120" y="${17 + index * 17}" width="8" height="8" rx="2" fill="${colors[index % colors.length]}"/>
+      <text x="134" y="${26 + index * 17}" fill="#d4d4d8" font-size="11">${escapeSvgText(item.label)}: ${percent}%</text>
+    `;
+  }).join('');
+
+  return `
+    <svg class="qn-chart-svg" viewBox="0 0 280 108" width="320" height="124" role="img" aria-label="pie chart">
+      <rect width="280" height="108" rx="8" fill="#18181b"/>
+      ${paths}
+      <circle cx="${centerX}" cy="${centerY}" r="16" fill="#18181b"/>
+      ${labels}
+    </svg>
+  `;
 }
 
 function parseChecklistLine(line) {
@@ -70,10 +288,16 @@ function renderMarkdownWithHighlighting(markdownText) {
 
 function createBlockChip(type, value) {
   const chip = document.createElement('span');
-  chip.setAttribute('data-block-type', type);
+  const normalizedType = type === 'latex' ? 'math' : type;
+  chip.setAttribute('data-block-type', normalizedType);
   chip.setAttribute('data-block-content', value);
   chip.setAttribute('contenteditable', 'false');
   chip.className = 'inline-flex items-center align-middle max-w-full px-2 py-0.5 mx-0.5 rounded-md border border-zinc-800 bg-zinc-800 text-zinc-100 text-xs whitespace-nowrap overflow-hidden';
+  chip.addEventListener('dblclick', (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    window.dispatchEvent(new CustomEvent('quicknote:edit-block', { detail: { element: chip } }));
+  });
 
   const preview = value.replace(/\s+/g, ' ').trim().slice(0, 56);
 
@@ -110,7 +334,7 @@ function createBlockChip(type, value) {
     return chip;
   }
 
-  if (type === 'latex') {
+  if (normalizedType === 'math') {
     chip.className = 'inline-flex items-center align-middle max-w-full px-2 py-1 mx-0.5 rounded-md border border-zinc-800 bg-zinc-900 text-zinc-100 text-xs overflow-hidden';
     const latexWrap = document.createElement('span');
     latexWrap.className = 'max-w-[420px] overflow-hidden';
@@ -119,8 +343,36 @@ function createBlockChip(type, value) {
     return chip;
   }
 
-  if (type === 'image') {
-    chip.textContent = `🖼 ${preview || 'image'}`;
+  if (normalizedType === 'graph') {
+    chip.className = 'qn-chart-chip inline-flex items-center align-top max-w-full mx-0.5 rounded-md border border-zinc-800 bg-zinc-900 text-zinc-100 text-xs overflow-hidden';
+    const graphWrap = document.createElement('span');
+    graphWrap.className = 'qn-chart-wrap block max-w-[420px] overflow-hidden';
+    graphWrap.innerHTML = createGraphSvg(value || 'x');
+    chip.appendChild(graphWrap);
+    return chip;
+  }
+
+  if (normalizedType === 'pie') {
+    chip.className = 'qn-chart-chip inline-flex items-center align-top max-w-full mx-0.5 rounded-md border border-zinc-800 bg-zinc-900 text-zinc-100 text-xs overflow-hidden';
+    const pieWrap = document.createElement('span');
+    pieWrap.className = 'qn-chart-wrap block max-w-[420px] overflow-hidden';
+    pieWrap.innerHTML = createPieSvg(value || 'A:50, B:50');
+    chip.appendChild(pieWrap);
+    return chip;
+  }
+
+  if (normalizedType === 'image') {
+    const data = parseBlockData(value, 'image');
+    const src = data.src || value;
+    chip.className = 'inline-flex items-center align-middle max-w-full mx-0.5 rounded-md border border-zinc-800 bg-zinc-900 text-zinc-100 text-xs overflow-hidden';
+    const img = document.createElement('img');
+    img.src = asAssetSrc(src);
+    img.alt = data.title || preview || 'image';
+    img.className = 'max-w-[420px] max-h-[260px] object-contain';
+    img.onerror = () => {
+      chip.textContent = `image: ${data.title || preview || 'missing source'}`;
+    };
+    chip.appendChild(img);
     return chip;
   }
 
@@ -129,8 +381,71 @@ function createBlockChip(type, value) {
     return chip;
   }
 
-  if (type === 'file') {
-    chip.textContent = `📁 ${preview || 'file'}`;
+  if (normalizedType === 'file') {
+    const data = parseBlockData(value, 'file');
+    const href = asAssetSrc(data.src || value);
+    const kind = getFileKind(data);
+    chip.className = 'qn-file-embed inline-flex items-center align-middle max-w-full mx-0.5 text-zinc-100 text-xs overflow-hidden';
+    const wrap = document.createElement('span');
+    wrap.className = 'qn-file-embed-inner';
+
+    const previewBox = document.createElement('span');
+    previewBox.className = `qn-file-embed-preview qn-file-kind-${kind}`;
+    if (kind === 'image') {
+      const image = document.createElement('img');
+      image.src = href;
+      image.alt = data.title || 'image file';
+      image.loading = 'lazy';
+      image.onerror = () => {
+        previewBox.innerHTML = '';
+        previewBox.appendChild(createFileGlyph(kind));
+      };
+      previewBox.appendChild(image);
+    } else if (kind === 'video') {
+      const video = document.createElement('video');
+      video.src = href;
+      video.muted = true;
+      video.preload = 'metadata';
+      video.playsInline = true;
+      video.onerror = () => {
+        previewBox.innerHTML = '';
+        previewBox.appendChild(createFileGlyph(kind));
+      };
+      previewBox.appendChild(video);
+    } else {
+      previewBox.appendChild(createFileGlyph(kind));
+    }
+
+    const body = document.createElement('span');
+    body.className = 'qn-file-embed-body';
+    const title = document.createElement('span');
+    title.className = 'qn-file-embed-title';
+    title.textContent = data.title || preview || 'file';
+    const meta = document.createElement('span');
+    meta.className = 'qn-file-embed-meta';
+    meta.textContent = formatBytes(data.size) || kind.toUpperCase();
+    const actions = document.createElement('span');
+    actions.className = 'qn-file-embed-actions';
+    const open = document.createElement('a');
+    open.href = href;
+    open.target = '_blank';
+    open.rel = 'noopener noreferrer';
+    open.className = 'qn-file-embed-action';
+    open.textContent = 'open';
+    const download = document.createElement('a');
+    download.href = href;
+    download.download = data.title || 'download';
+    download.className = 'qn-file-embed-action';
+    download.textContent = 'download';
+
+    actions.appendChild(open);
+    actions.appendChild(download);
+    body.appendChild(title);
+    body.appendChild(meta);
+    body.appendChild(actions);
+    wrap.appendChild(previewBox);
+    wrap.appendChild(body);
+    chip.appendChild(wrap);
     return chip;
   }
 
@@ -242,7 +557,7 @@ function parseInlineNodes(text) {
   const parseInlineMarkdownText = (value) => {
     const source = String(value || '');
     const inlineNodes = [];
-    const inlineRegex = /(\*\*|__)([^\n]+?)\1|(?<!\*)\*([^*\n]+)\*(?!\*)|(?<!_)_([^_\n]+)_(?!_)/g;
+    const inlineRegex = /\[\[([^\]\n]+)\]\]|(\*\*|__)([^\n]+?)\2|(?<!\*)\*([^*\n]+)\*(?!\*)|(?<!_)_([^_\n]+)_(?!_)/g;
     let cursor = 0;
     let token;
 
@@ -251,13 +566,24 @@ function parseInlineNodes(text) {
         inlineNodes.push(document.createTextNode(source.slice(cursor, token.index)));
       }
 
-      if (token[2] != null) {
+      if (token[1] != null) {
+        const noteLink = document.createElement('button');
+        noteLink.type = 'button';
+        noteLink.setAttribute('data-note-link', token[1]);
+        noteLink.setAttribute('contenteditable', 'false');
+        noteLink.className = 'text-blue-400 underline hover:text-blue-300';
+        noteLink.textContent = `[[${token[1]}]]`;
+        noteLink.addEventListener('click', () => {
+          window.dispatchEvent(new CustomEvent('quicknote:open-note-link', { detail: token[1] }));
+        });
+        inlineNodes.push(noteLink);
+      } else if (token[3] != null) {
         const strong = document.createElement('strong');
-        strong.appendChild(document.createTextNode(token[2] || ''));
+        strong.appendChild(document.createTextNode(token[3] || ''));
         inlineNodes.push(strong);
       } else {
         const em = document.createElement('em');
-        em.appendChild(document.createTextNode(token[3] || token[4] || ''));
+        em.appendChild(document.createTextNode(token[4] || token[5] || ''));
         inlineNodes.push(em);
       }
 
@@ -300,6 +626,31 @@ function parseContentToNodes(content) {
     const line = lines[index] || '';
     const unorderedMatch = line.match(/^\s*[-*+]\s+(.*)$/);
     const orderedMatch = line.match(/^\s*\d+\.\s+(.*)$/);
+    const quoteMatch = line.match(/^\s*>\s?(.*)$/);
+
+    if (quoteMatch) {
+      const quote = document.createElement('blockquote');
+      quote.className = 'border-l border-zinc-700 pl-3 py-1 my-1 text-zinc-300 italic bg-zinc-900/40 rounded-r-md';
+
+      while (index < lines.length) {
+        const quoteLine = lines[index] || '';
+        const match = quoteLine.match(/^\s*>\s?(.*)$/);
+        if (!match) break;
+
+        const block = document.createElement('div');
+        const inline = parseInlineNodes(match[1]);
+        if (inline.length === 0) {
+          block.appendChild(document.createElement('br'));
+        } else {
+          inline.forEach((node) => block.appendChild(node));
+        }
+        quote.appendChild(block);
+        index += 1;
+      }
+
+      nodes.push(quote);
+      continue;
+    }
 
     if (unorderedMatch || orderedMatch) {
       const isOrdered = Boolean(orderedMatch);
@@ -393,6 +744,15 @@ function serializeEditor(root) {
 
     if (el.tagName === 'UL' || el.tagName === 'OL') {
       el.childNodes.forEach((child) => walk(child, { listType: el.tagName }));
+      return;
+    }
+
+    if (el.tagName === 'BLOCKQUOTE') {
+      el.childNodes.forEach((child) => {
+        result += '> ';
+        child.childNodes.forEach((grandChild) => walk(grandChild, context));
+        if (!result.endsWith('\n')) result += '\n';
+      });
       return;
     }
 
@@ -632,14 +992,258 @@ function getTextBeforeCaretInBlock(selection, blockEl) {
   return probe.toString();
 }
 
-export default function Editor({ content, setContent }) {
+function PieEditor({ value, onChange, onCommit }) {
+  const [items, setItems] = useState(() => {
+    const raw = String(value || '');
+    if (!raw) return [{ label: '', amount: '' }];
+    return raw.split(/[,;\n]/).map((item) => {
+      const [label, amount] = item.includes(':') ? item.split(':') : ['', item];
+      return { label: label.trim(), amount: amount.trim() };
+    });
+  });
+
+  const containerRef = useRef(null);
+  const normalizeAmount = (amount) => {
+    const parsed = Number(String(amount ?? '').replace(',', '.'));
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+  };
+
+  const serializeItems = (nextItems) =>
+    nextItems
+      .map((i) => `${String(i.label || 'Slice').trim()}:${String(i.amount || 0).trim() || 0}`)
+      .join(', ');
+
+  const serializeAmount = (amount) => {
+    const rounded = Math.round(Number(amount || 0) * 100) / 100;
+    return Number.isInteger(rounded) ? String(rounded) : String(rounded);
+  };
+
+  const balanceItems = (nextItems, changedIndex = null) => {
+    const cleanItems = nextItems.map((item) => ({
+      label: item.label,
+      amount: String(item.amount ?? '').trim()
+    }));
+
+    if (changedIndex != null) {
+      const othersTotal = cleanItems.reduce((sum, item, index) => {
+        if (index === changedIndex) return sum;
+        return sum + normalizeAmount(item.amount);
+      }, 0);
+      const maxForChanged = Math.max(0, 100 - othersTotal);
+      const requested = normalizeAmount(cleanItems[changedIndex]?.amount);
+      if (requested > maxForChanged) {
+        cleanItems[changedIndex] = {
+          ...cleanItems[changedIndex],
+          amount: serializeAmount(maxForChanged)
+        };
+      }
+      return cleanItems;
+    }
+
+    const total = cleanItems.reduce((sum, item) => sum + normalizeAmount(item.amount), 0);
+    if (total <= 100) return cleanItems;
+
+    const equal = serializeAmount(100 / cleanItems.length);
+    return cleanItems.map((item) => ({ ...item, amount: equal }));
+  };
+
+  const focusInput = (rowIndex, field = 'label') => {
+    const inputIndex = rowIndex * 2 + (field === 'label' ? 0 : 1);
+    requestAnimationFrame(() => {
+      containerRef.current?.querySelectorAll('input')[inputIndex]?.focus();
+    });
+  };
+
+  useEffect(() => {
+    focusInput(0, 'label');
+  }, []);
+
+  const updateItem = (index, field, val) => {
+    let next = [...items];
+    next[index] = { ...next[index], [field]: val };
+    if (field === 'amount') {
+      next = balanceItems(next, index);
+    }
+    setItems(next);
+    onChange(serializeItems(next));
+  };
+
+  const addItem = (focus = true) => {
+    const total = items.reduce((sum, item) => sum + normalizeAmount(item.amount), 0);
+    let next = [...items, { label: '', amount: total < 100 ? serializeAmount(100 - total) : '' }];
+    if (total >= 100) {
+      const equal = serializeAmount(100 / next.length);
+      next = next.map((item) => ({ ...item, amount: equal }));
+    } else {
+      next = balanceItems(next);
+    }
+    setItems(next);
+    onChange(serializeItems(next));
+    if (focus) focusInput(next.length - 1, 'label');
+  };
+
+  const removeItem = (index) => {
+    if (items.length <= 1) {
+      setItems([{ label: '', amount: '' }]);
+      onChange('');
+      return;
+    }
+    const next = items.filter((_, i) => i !== index);
+    setItems(next);
+    onChange(serializeItems(next));
+    focusInput(Math.max(0, index - 1), 'label');
+  };
+
+  const handleKeyDown = (e, index, field) => {
+    if (e.key === 'Tab') {
+      e.preventDefault();
+      onCommit();
+      return;
+    }
+
+    const isEmptyVimNav = (e.key === 'j' || e.key === 'k') && !e.ctrlKey && !e.metaKey && !e.altKey && !String(e.currentTarget.value || '').trim();
+
+    if (e.key === 'ArrowDown' || (e.ctrlKey && e.key === 'j') || (isEmptyVimNav && e.key === 'j')) {
+      e.preventDefault();
+      const nextIndex = index + 1;
+      if (nextIndex < items.length) {
+        focusInput(nextIndex, field);
+      } else {
+        addItem(true);
+      }
+      return;
+    }
+
+    if (e.key === 'ArrowUp' || (e.ctrlKey && e.key === 'k') || (isEmptyVimNav && e.key === 'k')) {
+      e.preventDefault();
+      if (index > 0) {
+        focusInput(index - 1, field);
+      }
+      return;
+    }
+
+    if (e.key === 'ArrowRight' && field === 'label') {
+      const input = e.target;
+      if (input.selectionStart === input.value.length) {
+        e.preventDefault();
+        focusInput(index, 'amount');
+      }
+    }
+
+    if (e.key === 'ArrowLeft' && field === 'amount') {
+      const input = e.target;
+      if (input.selectionStart === 0) {
+        e.preventDefault();
+        focusInput(index, 'label');
+      }
+    }
+
+    if (e.key === 'ArrowRight' && field === 'amount') {
+      const input = e.target;
+      if (input.selectionStart === input.value.length) {
+        e.preventDefault();
+        containerRef.current?.querySelectorAll('button[data-pie-delete]')[index]?.focus();
+      }
+    }
+
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      if (index === items.length - 1) {
+        addItem(true);
+      } else {
+        focusInput(index + 1, field);
+      }
+    }
+  };
+
+  return (
+    <div ref={containerRef} className="flex flex-col gap-2 overflow-y-auto subtle-scrollbar max-h-[60vh] pr-2">
+      {items.map((item, index) => (
+        <div key={index} className="qn-pie-row animate-[fadein_150ms_linear]">
+          <input
+            className="qn-input qn-input-small qn-pie-label"
+            placeholder={`Slice ${index + 1}`}
+            value={item.label}
+            onKeyDown={(e) => handleKeyDown(e, index, 'label')}
+            onChange={(e) => updateItem(index, 'label', e.target.value)}
+          />
+          <input
+            className="qn-input qn-input-small qn-pie-value"
+            placeholder="%"
+            type="text"
+            inputMode="decimal"
+            value={item.amount}
+            onKeyDown={(e) => handleKeyDown(e, index, 'amount')}
+            onChange={(e) => updateItem(index, 'amount', e.target.value)}
+          />
+          <button
+            type="button"
+            data-pie-delete
+            aria-label={`Delete ${item.label || `slice ${index + 1}`}`}
+            className="qn-icon-button qn-icon-button-small qn-pie-delete text-zinc-500 hover:text-red-400 border-none bg-transparent hover:bg-zinc-800"
+            onClick={() => removeItem(index)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                removeItem(index);
+                return;
+              }
+              if (event.key === 'ArrowLeft' || event.key === 'h') {
+                event.preventDefault();
+                focusInput(index, 'amount');
+                return;
+              }
+              if (event.key === 'ArrowDown' || event.key === 'j') {
+                event.preventDefault();
+                focusInput(Math.min(items.length - 1, index + 1), 'label');
+              }
+              if (event.key === 'ArrowUp' || event.key === 'k') {
+                event.preventDefault();
+                focusInput(Math.max(0, index - 1), 'label');
+              }
+            }}
+          >
+            <IoTrash size={14} />
+          </button>
+        </div>
+      ))}
+      <div className="flex justify-between items-center mt-2 px-1">
+        <button
+          type="button"
+          className="text-[11px] text-zinc-500 hover:text-zinc-300 transition-colors"
+          onClick={() => addItem(true)}
+          onKeyDown={(event) => {
+            if (event.key === 'ArrowUp' || event.key === 'k') {
+              event.preventDefault();
+              focusInput(items.length - 1, 'label');
+            }
+            if (event.key === 'Tab') {
+              event.preventDefault();
+              onCommit();
+            }
+          }}
+        >
+          + Add item (or press Enter)
+        </button>
+        <span className="text-[10px] text-zinc-600">Arrows/Ctrl+JK to navigate · Tab to insert</span>
+      </div>
+    </div>
+  );
+}
+
+export default function Editor({ content, setContent, currentNote }) {
   const [cmdOpen, setCmdOpen] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
+  const [helpDetail, setHelpDetail] = useState(null);
   const [editingBlock, setEditingBlock] = useState(null);
+  const [editingBlockElement, setEditingBlockElement] = useState(null);
   const [blockContent, setBlockContent] = useState('');
   const [isFocused, setIsFocused] = useState(false);
 
   const editorRef = useRef(null);
   const blockInputRef = useRef(null);
+  const imageInputRef = useRef(null);
+  const fileInputRef = useRef(null);
   const markerRef = useRef(null);
   const initializedRef = useRef(false);
   const forceNextRenderRef = useRef(false);
@@ -658,11 +1262,32 @@ export default function Editor({ content, setContent }) {
     selection.addRange(range);
   };
 
-    useEffect(() => {
+  useEffect(() => {
     const editor = editorRef.current;
     if (!editor) return;
 
-    window.addEventListener("quicknote:focus-editor", focusEditorAtEnd)})
+    window.addEventListener("quicknote:focus-editor", focusEditorAtEnd);
+    return () => {
+      window.removeEventListener("quicknote:focus-editor", focusEditorAtEnd);
+    };
+  }, []);
+
+  useEffect(() => {
+    const handleEditBlock = (event) => {
+      const element = event.detail?.element;
+      if (!element?.getAttribute) return;
+      const type = element.getAttribute('data-block-type');
+      if (!type) return;
+      setEditingBlock(type);
+      setEditingBlockElement(element);
+      setBlockContent(element.getAttribute('data-block-content') || '');
+    };
+
+    window.addEventListener('quicknote:edit-block', handleEditBlock);
+    return () => {
+      window.removeEventListener('quicknote:edit-block', handleEditBlock);
+    };
+  }, []);
 
   const normalizeCaretAfterBlock = () => {
     const editor = editorRef.current;
@@ -753,6 +1378,70 @@ export default function Editor({ content, setContent }) {
     setContent(serializeEditor(editor));
   };
 
+  const insertTextAtCaret = (text) => {
+    const editor = editorRef.current;
+    if (!editor) return;
+
+    editor.focus();
+    const selection = window.getSelection();
+    const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
+    const activeRange = range && editor.contains(range.startContainer) ? range : document.createRange();
+
+    if (!range || !editor.contains(range.startContainer)) {
+      activeRange.selectNodeContents(editor);
+      activeRange.collapse(false);
+      selection?.removeAllRanges();
+      selection?.addRange(activeRange);
+    }
+
+    activeRange.deleteContents();
+    const textNode = document.createTextNode(text);
+    activeRange.insertNode(textNode);
+    setCaretInTextNode(textNode, text.length);
+    syncContent();
+  };
+
+  const commitBlock = (nextContent = blockContent) => {
+    const editor = editorRef.current;
+    if (!editor || !editingBlock) return;
+
+    const chip = createBlockChip(editingBlock, nextContent);
+    if (editingBlockElement?.parentNode) {
+      editingBlockElement.replaceWith(chip);
+    } else if (markerRef.current?.parentNode) {
+      markerRef.current.replaceWith(chip);
+    } else {
+      editor.appendChild(chip);
+    }
+
+    markerRef.current = null;
+    setEditingBlock(null);
+    setEditingBlockElement(null);
+    setBlockContent('');
+    syncContent();
+
+    requestAnimationFrame(() => {
+      editor.focus();
+      setCaretAfterNode(chip);
+    });
+  };
+
+  const handlePickedAsset = async (file, type) => {
+    if (!file) return;
+    try {
+      const copied = await copyAssetToNoteFolder(currentNote, file);
+      const payload = JSON.stringify({
+        ...copied,
+        kind: type
+      });
+      setBlockContent(payload);
+      requestAnimationFrame(() => blockInputRef.current?.focus());
+    } catch (error) {
+      console.error('Failed to copy asset into note folder:', error);
+      window.alert('Could not copy that file into the note folder.');
+    }
+  };
+
   const openBlockEditorFromCommand = (type, textNode, offset) => {
     const editor = editorRef.current;
     if (!editor) return;
@@ -780,7 +1469,7 @@ export default function Editor({ content, setContent }) {
     }
 
     const before = (textNode.textContent || '').slice(0, offset);
-    const match = before.match(/:(code|latex|link|image|video|file|checklist|md|markdown)$/);
+    const match = before.match(/:(code|math|graph|pie|link|image|video|file|checklist|md|markdown)$/);
     if (!match) return;
 
     const command = `:${type}`;
@@ -804,7 +1493,8 @@ export default function Editor({ content, setContent }) {
 
     range.insertNode(marker);
     markerRef.current = marker;
-    setEditingBlock(type);
+    setEditingBlock(type === 'latex' ? 'math' : type);
+    setEditingBlockElement(null);
     setBlockContent('');
     syncContent();
   };
@@ -891,7 +1581,7 @@ export default function Editor({ content, setContent }) {
       let blockEl = getClosestBlockElement(range.startContainer, editor);
       let preText = blockEl ? getTextBeforeCaretInBlock(selection, blockEl).trim() : '';
 
-      const isMarkdownTrigger = /^(#{1,6}|[-*+]|\d+\.)$/.test(preText);
+      const isMarkdownTrigger = /^(#{1,6}|[-*+]|\d+\.|>)$/.test(preText);
       if (!isMarkdownTrigger) return;
 
       if (!blockEl) {
@@ -902,8 +1592,9 @@ export default function Editor({ content, setContent }) {
       const headingMatch = preText.match(/^#{1,6}$/);
       const unorderedMatch = preText.match(/^[-*+]$/);
       const orderedMatch = preText.match(/^\d+\.$/);
+      const quoteMatch = preText.match(/^>$/);
 
-      if ((headingMatch || unorderedMatch || orderedMatch) && blockEl) {
+      if ((headingMatch || unorderedMatch || orderedMatch || quoteMatch) && blockEl) {
         e.preventDefault();
 
         const raw = blockEl.textContent || '';
@@ -936,6 +1627,19 @@ export default function Editor({ content, setContent }) {
           list.appendChild(item);
           blockEl.replaceWith(list);
           setCaretAtStart(item);
+        } else if (quoteMatch) {
+          const remaining = raw.replace(/^\s*>\s?/, '');
+          const quote = document.createElement('blockquote');
+          quote.className = 'border-l border-zinc-700 pl-3 py-1 my-1 text-zinc-300 italic bg-zinc-900/40 rounded-r-md';
+          const line = document.createElement('div');
+          if (remaining) {
+            line.textContent = remaining;
+          } else {
+            line.appendChild(document.createElement('br'));
+          }
+          quote.appendChild(line);
+          blockEl.replaceWith(quote);
+          setCaretAtStart(line);
         }
 
         syncContent();
@@ -956,7 +1660,7 @@ export default function Editor({ content, setContent }) {
           return;
         }
 
-        const match = textBefore.match(/:(code|latex|link|image|video|file|checklist|md|markdown)$/);
+        const match = textBefore.match(/:(code|math|graph|pie|link|image|video|file|checklist|md|markdown)$/);
         if (match) {
           e.preventDefault();
           openBlockEditorFromCommand(match[1], container, offset);
@@ -998,28 +1702,10 @@ export default function Editor({ content, setContent }) {
 
   const handleBlockKeyDown = (e) => {
     if (e.key === 'Tab') {
-      e.preventDefault();
-      const marker = markerRef.current;
-      const editor = editorRef.current;
-      if (!editor) return;
-
-      const chip = createBlockChip(editingBlock, blockContent);
-
-      if (marker && marker.parentNode) {
-        marker.replaceWith(chip);
-      } else {
-        editor.appendChild(chip);
+      if (editingBlock !== 'pie') {
+        e.preventDefault();
+        commitBlock();
       }
-
-      markerRef.current = null;
-      setEditingBlock(null);
-      setBlockContent('');
-      syncContent();
-
-      requestAnimationFrame(() => {
-        editor.focus();
-        setCaretAfterNode(chip);
-      });
       return;
     }
 
@@ -1027,9 +1713,10 @@ export default function Editor({ content, setContent }) {
       if (editingBlock) {
         e.preventDefault();
         const marker = markerRef.current;
-        if (marker && marker.parentNode) marker.remove();
+        if (!editingBlockElement && marker && marker.parentNode) marker.remove();
         markerRef.current = null;
         setEditingBlock(null);
+        setEditingBlockElement(null);
         setBlockContent('');
         syncContent();
         requestAnimationFrame(() => editorRef.current?.focus());
@@ -1039,6 +1726,16 @@ export default function Editor({ content, setContent }) {
       }
       return;
     }
+
+    if (editingBlock === 'math' || editingBlock === 'graph') {
+       if (e.key === 'Enter') {
+         e.preventDefault();
+         commitBlock();
+         return;
+       }
+    }
+
+    if (editingBlock === 'pie') return; // Handled by PieEditor internally
 
     const pairs = {
       '(': ')',
@@ -1080,7 +1777,7 @@ export default function Editor({ content, setContent }) {
   };
 
   return (
-    <div className="h-full relative overflow-hidden">
+    <div className="qn-editor h-full relative overflow-hidden">
         <div className={`absolute top-6 left-6 text-zinc-500 text-sm pointer-events-none transition-all duration-250 ${placeholderVisible ? 'opacity-100' : 'opacity-0'}`}>
           Write your note...
         </div>
@@ -1094,24 +1791,78 @@ export default function Editor({ content, setContent }) {
         onInput={handleEditorInput}
         onFocus={() => setIsFocused(true)}
         onBlur={() => setIsFocused(false)}
-        className="w-full h-full overflow-y-auto subtle-scrollbar outline-none text-sm leading-relaxed p-6 whitespace-pre-wrap break-words"
+        className="qn-editor-surface w-full h-full overflow-y-auto subtle-scrollbar outline-none text-sm leading-relaxed p-6 whitespace-pre-wrap break-words"
       />
 
       {editingBlock && (
-        <div className='fixed inset-0 flex items-center justify-center p-4 animate-[fadein_190ms_linear] bg-black/50'>
+        <div className='fixed inset-0 flex items-center justify-center p-4 animate-[fadein_190ms_linear] bg-black/50 z-50'>
         <div className="absolute inset-0 flex items-center justify-center p-6 animate-[scalein_320ms_cubic-bezier(0.16,1,0.3,1)]">
-          <div className="w-full h-full rounded-[32px] border border-zinc-800 bg-zinc-900 p-6 flex flex-col">
+          <div className="qn-dialog w-full h-full border border-zinc-800 bg-zinc-900 p-6 flex flex-col">
             <div className="text-xs text-zinc-400/70 mb-2 flex justify-between">
               <span>{editingBlock.toUpperCase()} BLOCK</span>
-              <span>Tab to insert · Esc to cancel</span>
+              <span>{editingBlock === 'math' || editingBlock === 'graph' ? 'Enter to insert' : 'Tab to insert'} · Esc to cancel</span>
             </div>
-            <textarea
-              ref={blockInputRef}
-              value={blockContent}
-              onChange={(e) => setBlockContent(e.target.value)}
-              onKeyDown={handleBlockKeyDown}
-              className="w-full h-full bg-transparent outline-none text-sm resize-none leading-relaxed"
-              placeholder={`Enter ${editingBlock} content...`}
+            {(editingBlock === 'image' || editingBlock === 'file') && (
+              <div className="flex items-center gap-2 mb-3">
+                {editingBlock === 'image' && (
+                  <button
+                    type="button"
+                    className="qn-button text-xs"
+                    onClick={() => imageInputRef.current?.click()}
+                  >
+                    Pick image
+                  </button>
+                )}
+                {editingBlock === 'file' && (
+                  <button
+                    type="button"
+                    className="qn-button text-xs"
+                    onClick={() => fileInputRef.current?.click()}
+                  >
+                    Pick file
+                  </button>
+                )}
+                <span className="text-xs text-zinc-500">
+                  {editingBlock === 'image' ? 'Type a URL or pick a local image.' : 'Pick a local file to copy beside this note.'}
+                </span>
+              </div>
+            )}
+            
+            {editingBlock === 'pie' ? (
+              <PieEditor value={blockContent} onChange={setBlockContent} onCommit={commitBlock} />
+            ) : (
+              <textarea
+                ref={blockInputRef}
+                value={blockContent}
+                onChange={(e) => setBlockContent(e.target.value)}
+                onKeyDown={handleBlockKeyDown}
+                className={`qn-block-textarea w-full h-full bg-transparent outline-none text-sm resize-none leading-relaxed ${
+                  (editingBlock === 'math' || editingBlock === 'graph') ? 'max-h-[32px]' : ''
+                }`}
+                placeholder={`Enter ${editingBlock} content...`}
+              />
+            )}
+            
+            <input
+              ref={imageInputRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                event.target.value = '';
+                handlePickedAsset(file, 'image');
+              }}
+            />
+            <input
+              ref={fileInputRef}
+              type="file"
+              className="hidden"
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                event.target.value = '';
+                handlePickedAsset(file, 'file');
+              }}
             />
           </div>
         </div>
@@ -1158,8 +1909,51 @@ export default function Editor({ content, setContent }) {
             return;
           }
 
+          if (id === 'settings') {
+            window.dispatchEvent(new CustomEvent('quicknote:open-settings'));
+            return;
+          }
+
           if (id === 'rename') {
             window.dispatchEvent(new CustomEvent('quicknote:open-rename'));
+            return;
+          }
+
+          if (id === 'help') {
+            setTimeout(() => setHelpOpen(true), 0);
+          }
+        }}
+      />
+      <CommandPalette
+        open={helpOpen}
+        setOpen={setHelpOpen}
+        commands={HELP_COMMANDS}
+        title="Help"
+        onCommand={(id) => {
+          if (id === 'keybindings' || id === 'cheats' || id === 'credits') {
+            setTimeout(() => setHelpDetail(id), 0);
+          }
+        }}
+      />
+      <CommandPalette
+        open={Boolean(helpDetail)}
+        setOpen={(nextOpen) => {
+          if (!nextOpen) setHelpDetail(null);
+        }}
+        commands={
+          helpDetail === 'keybindings' ? KEYBINDING_COMMANDS : 
+          helpDetail === 'cheats' ? CHEAT_COMMANDS : 
+          CREDIT_COMMANDS
+        }
+        title={
+          helpDetail === 'keybindings' ? 'Keybindings' : 
+          helpDetail === 'cheats' ? 'Cheats' : 
+          'Credits'
+        }
+        onCommand={(id) => {
+          const cheat = CHEAT_COMMANDS.find((command) => command.id === id);
+          if (cheat?.insert) {
+            insertTextAtCaret(cheat.insert);
           }
         }}
       />

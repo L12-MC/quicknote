@@ -11,6 +11,45 @@ fn quit_app(app: tauri::AppHandle) {
     app.exit(0);
 }
 
+#[tauri::command]
+fn open_notes_folder(app: tauri::AppHandle) -> Result<(), String> {
+    println!("Quicknote: Opening notes folder");
+    let notes_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| error.to_string())?
+        .join("vault")
+        .join("notes");
+
+    std::fs::create_dir_all(&notes_dir).map_err(|error| error.to_string())?;
+
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("explorer")
+            .arg(&notes_dir)
+            .spawn()
+            .map_err(|error| error.to_string())?;
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg(&notes_dir)
+            .spawn()
+            .map_err(|error| error.to_string())?;
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        std::process::Command::new("xdg-open")
+            .arg(&notes_dir)
+            .spawn()
+            .map_err(|error| error.to_string())?;
+    }
+
+    Ok(())
+}
+
 const BASELINE_MONITOR_WIDTH: f64 = 1920.0;
 const BASELINE_MONITOR_HEIGHT: f64 = 1080.0;
 const BASELINE_WINDOW_WIDTH: f64 = 400.0;
@@ -33,6 +72,7 @@ fn gtk_scale_factor() -> f64 {
 }
 
 fn startup_window_size(window: &WebviewWindow) -> (f64, f64) {
+    println!("Quicknote: Set window size");
     let Some(monitor) = window.current_monitor().ok().flatten() else {
         return (BASELINE_WINDOW_WIDTH, BASELINE_WINDOW_HEIGHT);
     };
@@ -65,7 +105,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_fs::init()) // Register the FS plugin
         .setup(|app| {
-            println!("Gemini CLI: Backend is running!"); // ADDED LINE
+            println!("Quicknote: Backend is running"); // ADDED LINE
             if let Some(window) = app.get_webview_window("main") {
                 let (width, height) = startup_window_size(&window);
                 let _ = window.set_size(Size::Logical(LogicalSize::new(width, height)));
@@ -74,7 +114,7 @@ pub fn run() {
 
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![greet, quit_app])
+        .invoke_handler(tauri::generate_handler![greet, quit_app, open_notes_folder])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

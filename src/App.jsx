@@ -4,8 +4,15 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
 import Editor from './components/Editor';
 import CommandPalette from './components/CommandPalette';
 import { initHighlighter } from './lib/shiki';
-import { loadNotesFromDisk, saveNotesToDisk } from './lib/storage';
-import { event } from '@tauri-apps/api';
+import {
+  loadAppSettingsFromDisk,
+  loadNotesFromDisk,
+  loadThemesFromDisk,
+  saveAppSettingsToDisk,
+  saveNotesToDisk,
+  saveThemesToDisk
+} from './lib/storage';
+import { IoAdd, IoArrowBack, IoCheckmark, IoCloudUploadOutline, IoFolderOpenOutline, IoSettingsOutline, IoTrash } from 'react-icons/io5';
 
 const BUILTIN_THEME_OPTIONS = [
   { id: 'dark', label: 'Dark' },
@@ -17,18 +24,187 @@ const BUILTIN_THEME_OPTIONS = [
 
 const CUSTOM_THEME_STORAGE_KEY = 'quicknote-custom-theme';
 const CUSTOM_THEME_KEYS = ['bg', 'surface', 'surface2', 'text', 'textSoft', 'muted', 'border', 'accent', 'accentSoft'];
+const DEFAULT_UI_FONT = '"Mulish", "Elms Sans", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+const DEFAULT_NOTES_FONT = '"JetBrains Mono", ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace';
 
 const MENU_COMMANDS = [
   { id: 'newnote', label: 'newnote', hint: 'Create a new note' },
+  { id: 'settings', label: 'settings', hint: 'Open settings' },
   { id: 'quit', label: 'quit', hint: 'Close QuickNote' },
-  { id: 'deleteall', label: 'deleteall', hint: 'Delete all notes' },
-  { id: 'settheme', label: 'settheme', hint: 'Choose app theme' }
+  { id: 'deleteall', label: 'deleteall', hint: 'Delete all notes' }
 ];
 
 function focusEditor() {
   setTimeout(() => {
     
   }, 10);
+}
+
+function ToggleSwitch({ checked, onChange, label, description }) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      onClick={() => onChange(!checked)}
+      className="qn-setting-row group"
+    >
+      <span>
+        <span className="qn-setting-label">{label}</span>
+        <span className="qn-setting-description">{description}</span>
+      </span>
+      <span className={`qn-switch ${checked ? 'qn-switch-on' : ''}`} aria-hidden="true">
+        <span />
+      </span>
+    </button>
+  );
+}
+
+function SettingsPage({
+  theme,
+  themeOptions,
+  setTheme,
+  onBack,
+  onLoadCustomTheme,
+  onOpenNotesFolder,
+  useMonospaceNotes,
+  setUseMonospaceNotes,
+  reducedMotion,
+  setReducedMotion,
+  uiFont,
+  setUiFont,
+  notesFont,
+  setNotesFont
+}) {
+  const rootRef = useRef(null);
+
+  const getSettingsControls = () => Array.from(rootRef.current?.querySelectorAll('button, input, textarea, select, [tabindex]:not([tabindex="-1"])') || [])
+    .filter((item) => !item.disabled && item.offsetParent !== null);
+
+  const focusNextControl = (direction) => {
+    const controls = getSettingsControls();
+    if (controls.length === 0) return;
+
+    const currentIndex = controls.indexOf(document.activeElement);
+    const fallbackIndex = direction > 0 ? -1 : 0;
+    const nextIndex = (currentIndex >= 0 ? currentIndex : fallbackIndex) + direction;
+    const clampedIndex = Math.max(0, Math.min(controls.length - 1, nextIndex));
+    controls[clampedIndex]?.focus();
+  };
+
+  useEffect(() => {
+    requestAnimationFrame(() => {
+      getSettingsControls()[0]?.focus();
+    });
+  }, []);
+
+  const handleSettingsKeyDown = (event) => {
+    const isTextField = ['INPUT', 'TEXTAREA'].includes(event.target?.tagName);
+    if (isTextField && event.key.length === 1 && event.key !== 'j' && event.key !== 'k') return;
+
+    if (event.key === 'ArrowDown' || event.key === 'j') {
+      event.preventDefault();
+      focusNextControl(1);
+      return;
+    }
+    if (event.key === 'ArrowUp' || event.key === 'k') {
+      event.preventDefault();
+      focusNextControl(-1);
+      return;
+    }
+    if ((event.key === 'Enter' || event.key === ' ') && event.target?.tagName === 'BUTTON') {
+      event.preventDefault();
+      event.target.click();
+    }
+  };
+
+  return (
+    <div ref={rootRef} tabIndex={-1} onKeyDown={handleSettingsKeyDown} className="qn-shell qn-settings-shell">
+      <header className="qn-topbar">
+        <button type="button" className="qn-icon-button" onClick={onBack} aria-label="Back">
+          <IoArrowBack />
+        </button>
+        <div>
+          <h1 className="qn-title">Settings</h1>
+          <p className="qn-subtitle">Appearance and input preferences</p>
+        </div>
+      </header>
+
+      <main className="qn-settings-grid subtle-scrollbar">
+        <section className="qn-panel">
+          <div className="qn-section-header">
+            <h2>Theme</h2>
+            <button type="button" className="qn-button" onClick={onLoadCustomTheme}>
+              <IoCloudUploadOutline />
+              Load custom
+            </button>
+          </div>
+          <div className="qn-theme-list" role="radiogroup" aria-label="Theme">
+            {themeOptions.map((option) => {
+              const selected = theme === option.id;
+              return (
+                <button
+                  key={option.id}
+                  type="button"
+                  role="radio"
+                  aria-checked={selected}
+                  className={`qn-theme-option ${selected ? 'is-selected' : ''}`}
+                  onClick={() => setTheme(option.id)}
+                >
+                  <span>{option.label}</span>
+                  {selected && <IoCheckmark aria-hidden="true" />}
+                </button>
+              );
+            })}
+          </div>
+        </section>
+
+        <section className="qn-panel">
+          <div className="qn-section-header">
+            <h2>Notes</h2>
+            <button type="button" className="qn-button" onClick={onOpenNotesFolder}>
+              <IoFolderOpenOutline />
+              Open folder
+            </button>
+          </div>
+          <ToggleSwitch
+            checked={useMonospaceNotes}
+            onChange={setUseMonospaceNotes}
+            label="Use monospace font for notes"
+            description="Keeps code-heavy notes aligned and predictable."
+          />
+          <label className="qn-field">
+            <span>Notes font</span>
+            <input
+              value={notesFont}
+              onChange={(event) => setNotesFont(event.target.value)}
+              placeholder={DEFAULT_NOTES_FONT}
+            />
+          </label>
+        </section>
+
+        <section className="qn-panel">
+          <div className="qn-section-header">
+            <h2>Interface</h2>
+          </div>
+          <ToggleSwitch
+            checked={reducedMotion}
+            onChange={setReducedMotion}
+            label="Use reduced motion animations"
+            description="Minimizes transitions and entrance animations."
+          />
+          <label className="qn-field">
+            <span>Interface font</span>
+            <input
+              value={uiFont}
+              onChange={(event) => setUiFont(event.target.value)}
+              placeholder={DEFAULT_UI_FONT}
+            />
+          </label>
+        </section>
+      </main>
+    </div>
+  );
 }
 
 
@@ -39,15 +215,20 @@ export default function App() {
   const notesRef = useRef(notes); // ADDED: Ref to hold the latest notes
   const [activeNoteId, setActiveNoteId] = useState('note-1');
   const [view, setView] = useState('editor');
+  const [previousView, setPreviousView] = useState('editor');
   const [isReady, setIsReady] = useState(false);
   const [hasLoadedNotes, setHasLoadedNotes] = useState(false);
+  const [hasLoadedSettings, setHasLoadedSettings] = useState(false);
   const [renameOpen, setRenameOpen] = useState(false);
   const [renameValue, setRenameValue] = useState('');
   const [menuCmdOpen, setMenuCmdOpen] = useState(false);
   const [isHidden, setIsHidden] = useState(false);
   const [menuSelectedIndex, setMenuSelectedIndex] = useState(0);
   const [theme, setTheme] = useState(() => localStorage.getItem('quicknote-theme') || 'dark');
-  const [themePickerOpen, setThemePickerOpen] = useState(false);
+  const [useMonospaceNotes, setUseMonospaceNotes] = useState(() => localStorage.getItem('quicknote-notes-monospace') !== 'false');
+  const [reducedMotion, setReducedMotion] = useState(() => localStorage.getItem('quicknote-reduced-motion') === 'true');
+  const [uiFont, setUiFont] = useState(() => localStorage.getItem('quicknote-ui-font') || DEFAULT_UI_FONT);
+  const [notesFont, setNotesFont] = useState(() => localStorage.getItem('quicknote-notes-font') || DEFAULT_NOTES_FONT);
   const [customTheme, setCustomTheme] = useState(() => {
     try {
       const raw = localStorage.getItem(CUSTOM_THEME_STORAGE_KEY);
@@ -86,14 +267,16 @@ export default function App() {
   const themeOptions = customTheme
     ? [...BUILTIN_THEME_OPTIONS, { id: 'custom', label: customTheme.name || 'Custom' }]
     : BUILTIN_THEME_OPTIONS;
-  const themeCommands = [
-    ...themeOptions.map((option) => ({
-      id: `theme:${option.id}`,
-      label: option.label.toLowerCase(),
-      hint: theme === option.id ? 'Current theme' : 'Apply theme'
-    })),
-    { id: 'theme:load-custom', label: 'load-custom', hint: 'Load custom theme file' }
-  ];
+
+  const openSettings = (fromView = view) => {
+    setMenuCmdOpen(false);
+    setPreviousView(fromView === 'settings' ? 'editor' : fromView);
+    setView('settings');
+  };
+
+  const closeSettings = () => {
+    setView(previousView || 'editor');
+  };
 
   const applyCustomThemeVars = (vars) => {
     const root = document.documentElement;
@@ -170,6 +353,15 @@ export default function App() {
     return null;
   };
 
+  const normalizeNoteTitleAndFolder = (value) => {
+    const parts = String(value || 'Untitled Note').split(/[\\/]+/).map((part) => part.trim()).filter(Boolean);
+    const title = parts.pop() || 'Untitled Note';
+    return {
+      title,
+      folder: parts.join('/')
+    };
+  };
+
   const activeNote = notes.find((note) => note.id === activeNoteId) || notes[0];
 
   const shouldPersistNote = (note) => {
@@ -183,13 +375,39 @@ export default function App() {
 
   const setActiveContent = (nextContent) => {
     setNotes((prev) =>
-      prev.map((note) => (note.id === activeNoteId ? { ...note, content: nextContent } : note))
+      prev.map((note) => {
+        if (note.id === activeNoteId) {
+          const updatedNote = { ...note, content: nextContent };
+          if (!note.manuallyRenamed) {
+            const firstLine = nextContent.split('\n').find((l) => l.trim().length > 0) || '';
+            let newTitle = 'Untitled Note';
+
+            const headingMatch = firstLine.match(/^#{1,6}\s+(.*)$/);
+            const htmlHeadingMatch = firstLine.match(/^<h[1-6]>([\s\S]*)<\/h[1-6]>$/i);
+
+            if (headingMatch) {
+              newTitle = headingMatch[1].trim();
+            } else if (htmlHeadingMatch) {
+              newTitle = htmlHeadingMatch[1].replace(/<[^>]*>/g, '').trim();
+            } else if (firstLine) {
+              newTitle = firstLine.replace(/<[^>]*>/g, '').trim();
+            }
+
+            newTitle = newTitle.slice(0, 100) || 'Untitled Note';
+            if (newTitle !== note.title) {
+              updatedNote.title = newTitle;
+            }
+          }
+          return updatedNote;
+        }
+        return note;
+      })
     );
   };
 
   const createNote = () => {
     const id = `note-${Date.now()}`;
-    const newNote = { id, title: 'Untitled Note', content: '' };
+    const newNote = { id, title: 'Untitled Note', folder: '', content: '', manuallyRenamed: false };
     setNotes((prev) => [newNote, ...prev]);
     setActiveNoteId(id);
     setView('editor');
@@ -200,7 +418,7 @@ export default function App() {
       const nextNotes = prev.filter((note) => note.id !== noteId);
       if (nextNotes.length === 0) {
         const freshId = `note-${Date.now()}`;
-        const freshNote = { id: freshId, title: 'Untitled Note', content: '' };
+        const freshNote = { id: freshId, title: 'Untitled Note', folder: '', content: '', manuallyRenamed: false };
         setActiveNoteId(freshId);
         return [freshNote];
       }
@@ -233,9 +451,68 @@ export default function App() {
   }, [theme, customTheme]);
 
   useEffect(() => {
+    const root = document.documentElement;
+    const normalizedUiFont = uiFont.trim() || DEFAULT_UI_FONT;
+    const normalizedNotesFont = notesFont.trim() || DEFAULT_NOTES_FONT;
+
+    root.style.setProperty('--qn-ui-font', normalizedUiFont);
+    root.style.setProperty('--qn-note-font', normalizedNotesFont);
+    root.setAttribute('data-notes-monospace', String(useMonospaceNotes));
+    root.setAttribute('data-reduced-motion', String(reducedMotion));
+
+    localStorage.setItem('quicknote-ui-font', normalizedUiFont);
+    localStorage.setItem('quicknote-notes-font', normalizedNotesFont);
+    localStorage.setItem('quicknote-notes-monospace', String(useMonospaceNotes));
+    localStorage.setItem('quicknote-reduced-motion', String(reducedMotion));
+  }, [uiFont, notesFont, useMonospaceNotes, reducedMotion]);
+
+  useEffect(() => {
+    if (!hasLoadedSettings) return;
+    saveAppSettingsToDisk({
+      theme,
+      useMonospaceNotes,
+      reducedMotion,
+      uiFont: uiFont.trim() || DEFAULT_UI_FONT,
+      notesFont: notesFont.trim() || DEFAULT_NOTES_FONT
+    }).catch((error) => {
+      console.error('Failed to persist settings:', error);
+    });
+  }, [theme, useMonospaceNotes, reducedMotion, uiFont, notesFont, hasLoadedSettings]);
+
+  useEffect(() => {
+    if (!hasLoadedSettings) return;
+    saveThemesToDisk({ customTheme }).catch((error) => {
+      console.error('Failed to persist themes:', error);
+    });
+  }, [customTheme, hasLoadedSettings]);
+
+  useEffect(() => {
     const init = async () => {
       const freshId = `note-${Date.now()}`;
-      const freshNote = { id: freshId, title: 'Untitled Note', content: '' };
+      const freshNote = { id: freshId, title: 'Untitled Note', folder: '', content: '' };
+
+      try {
+        const [storedSettings, storedThemes] = await Promise.all([
+          loadAppSettingsFromDisk(),
+          loadThemesFromDisk()
+        ]);
+
+        if (storedSettings) {
+          if (storedSettings.theme) setTheme(storedSettings.theme);
+          if (typeof storedSettings.useMonospaceNotes === 'boolean') setUseMonospaceNotes(storedSettings.useMonospaceNotes);
+          if (typeof storedSettings.reducedMotion === 'boolean') setReducedMotion(storedSettings.reducedMotion);
+          if (storedSettings.uiFont) setUiFont(storedSettings.uiFont);
+          if (storedSettings.notesFont) setNotesFont(storedSettings.notesFont);
+        }
+
+        if (storedThemes?.customTheme) {
+          setCustomTheme(storedThemes.customTheme);
+        }
+      } catch (error) {
+        console.error('Failed to load settings from disk:', error);
+      } finally {
+        setHasLoadedSettings(true);
+      }
 
       try {
         const storedNotes = await loadNotesFromDisk();
@@ -296,19 +573,38 @@ export default function App() {
     };
     const openRename = () => {
       const current = notes.find((note) => note.id === activeNoteId);
-      setRenameValue(current?.title || 'Untitled Note');
+      setRenameValue(current?.folder ? `${current.folder}/${current.title || 'Untitled Note'}` : current?.title || 'Untitled Note');
       setRenameOpen(true);
+    };
+    const handleOpenSettings = () => {
+      openSettings(view);
+    };
+    const openNoteLink = (event) => {
+      const rawTarget = String(event.detail || '').trim().toLowerCase();
+      if (!rawTarget) return;
+
+      const target = rawTarget.replace(/\\/g, '/');
+      const linkedNote = notes.find((note) => {
+        const title = String(note.title || '').toLowerCase();
+        const path = note.folder ? `${note.folder}/${note.title}`.toLowerCase() : title;
+        return title === target || path === target || String(note.path || '').replace(/\.md$/i, '').toLowerCase() === target;
+      });
+
+      if (linkedNote) {
+        setActiveNoteId(linkedNote.id);
+        setView('editor');
+      }
     };
 
     const renameNote = () => {
-      const nextTitle = renameValue.trim();
-      if (!nextTitle) {
+      const nextLocation = normalizeNoteTitleAndFolder(renameValue);
+      if (!nextLocation.title.trim()) {
         setRenameOpen(false);
         return;
       }
       setNotes((prev) =>
         prev.map((note) =>
-          note.id === activeNoteId ? { ...note, title: nextTitle } : note
+          note.id === activeNoteId ? { ...note, title: nextLocation.title, folder: nextLocation.folder, manuallyRenamed: true } : note
         )
       );
       setRenameOpen(false);
@@ -318,13 +614,17 @@ export default function App() {
     window.addEventListener('quicknote:open-rename', openRename);
     window.addEventListener('quicknote:rename-note', openRename);
     window.addEventListener('quicknote:rename-submit', renameNote);
+    window.addEventListener('quicknote:open-settings', handleOpenSettings);
+    window.addEventListener('quicknote:open-note-link', openNoteLink);
     return () => {
       window.removeEventListener('quicknote:go-menu', openMenu);
       window.removeEventListener('quicknote:open-rename', openRename);
       window.removeEventListener('quicknote:rename-note', openRename);
       window.removeEventListener('quicknote:rename-submit', renameNote);
+      window.removeEventListener('quicknote:open-settings', handleOpenSettings);
+      window.removeEventListener('quicknote:open-note-link', openNoteLink);
     };
-  }, [notes, activeNoteId, renameValue]);
+  }, [notes, activeNoteId, renameValue, view, previousView]);
 
   useEffect(() => {
     const handleGlobalShortcuts = (event) => {
@@ -336,18 +636,28 @@ export default function App() {
           getCurrentWindow().close();
         }
       }
+
+      if (event.ctrlKey && event.code === 'Comma') {
+        event.preventDefault();
+        openSettings(view);
+      }
+
+      if (view === 'settings' && event.key === 'Escape') {
+        event.preventDefault();
+        closeSettings();
+      }
     };
 
     window.addEventListener('keydown', handleGlobalShortcuts);
     return () => {
       window.removeEventListener('keydown', handleGlobalShortcuts);
     };
-  }, []);
+  }, [view, previousView]);
 
   useEffect(() => {
     const handleMenuShortcuts = (event) => {
       if (view !== 'menu') return;
-      if (menuCmdOpen || themePickerOpen) return;
+      if (menuCmdOpen) return;
 
       // Cooldown to prevent accidental double-triggers when switching views
       if (Date.now() - lastMenuOpenTime.current < 400) return;
@@ -383,6 +693,9 @@ export default function App() {
       } else if (event.key === 'n' && !event.ctrlKey && !event.metaKey) {
         event.preventDefault();
         createNote();
+      } else if (event.key === 's' && !event.ctrlKey && !event.metaKey) {
+        event.preventDefault();
+        openSettings('menu');
       }
     };
 
@@ -390,7 +703,7 @@ export default function App() {
     return () => {
       window.removeEventListener('keydown', handleMenuShortcuts);
     };
-  }, [view, menuCmdOpen, themePickerOpen, notes, menuSelectedIndex]);
+  }, [view, menuCmdOpen, notes, menuSelectedIndex]);
 
   useEffect(() => {
     if (renameOpen) {
@@ -410,10 +723,66 @@ export default function App() {
     window.dispatchEvent(new CustomEvent('quicknote:rename-submit'));
   };
 
+  const handleThemeFileChange = async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const text = await file.text();
+    const parsed = parseCustomThemeFromText(text, file.name.replace(/\.[^.]+$/, ''));
+    event.target.value = '';
+
+    if (!parsed) {
+      window.alert('Could not parse custom theme file. See docs/custom-themes.md for format.');
+      return;
+    }
+
+    setCustomTheme(parsed);
+    setTheme('custom');
+  };
+
+  const openNotesFolder = async () => {
+    try {
+      await invoke('open_notes_folder');
+    } catch (error) {
+      console.error('Failed to open notes folder:', error);
+      window.alert('Could not open the notes folder.');
+    }
+  };
+
   if (!isReady) {
     return (
-      <div className="w-screen h-screen flex items-center justify-center bg-zinc-950 text-zinc-100 font-mono">
+      <div className="qn-loading w-screen h-screen flex items-center justify-center bg-zinc-950 text-zinc-100">
         <div className="text-sm text-zinc-400">Initializing QuickNote...</div>
+      </div>
+    );
+  }
+
+  if (view === 'settings') {
+    return (
+      <div style={{ cursor: isHidden ? 'none' : 'auto', height: '100vh' }}>
+        <SettingsPage
+          theme={theme}
+          themeOptions={themeOptions}
+          setTheme={setTheme}
+          onBack={closeSettings}
+          onLoadCustomTheme={() => themeInputRef.current?.click()}
+          onOpenNotesFolder={openNotesFolder}
+          useMonospaceNotes={useMonospaceNotes}
+          setUseMonospaceNotes={setUseMonospaceNotes}
+          reducedMotion={reducedMotion}
+          setReducedMotion={setReducedMotion}
+          uiFont={uiFont}
+          setUiFont={setUiFont}
+          notesFont={notesFont}
+          setNotesFont={setNotesFont}
+        />
+        <input
+          ref={themeInputRef}
+          type="file"
+          accept=".json,.md,text/markdown,application/json,text/plain"
+          className="hidden"
+          onChange={handleThemeFileChange}
+        />
       </div>
     );
   }
@@ -421,53 +790,78 @@ export default function App() {
   if (view === 'menu') {
     return (
       <div style={{ cursor: isHidden ? 'none' : 'auto', height: '100vh' }}>
-      <div className="w-screen h-screen bg-zinc-950 text-zinc-100 font-[Syne] p-4">
-        <div className="h-full border border-transparent rounded-m p-4 flex flex-col gap-3">
-          <div className='flex items-center justify-between'>
-            <h1 className='text-xl text-zinc-300 justify-center font-[Mulish]'>QuickNote</h1>
-            <div className="text-xs text-zinc-500">Theme: {themeOptions.find((option) => option.id === theme)?.label || 'Dark'}</div>
+      <div className="qn-shell w-screen h-screen bg-zinc-950 text-zinc-100 p-6">
+        <div className="h-full flex flex-col gap-3">
+          <div className='qn-topbar'>
+            <div>
+              <h1 className='qn-title'>QuickNote</h1>
+              <p className="qn-subtitle">{notes.length} notes</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => openSettings('menu')}
+              className="qn-icon-button"
+              aria-label="Open settings"
+              title="Settings"
+            >
+              <IoSettingsOutline />
+            </button>
           </div>
           <div className="flex items-center justify-between">
-            <h1 className="text-sm text-zinc-300">All Notes</h1>
+            <h2 className="text-sm text-zinc-300">All Notes</h2>
             <button
+              type="button"
               onClick={createNote}
-              className="text-xs px-2 py-1 rounded border border-zinc-700 hover:bg-zinc-800"
+              className="qn-icon-button"
+              aria-label="Create note"
+              title="New note"
             >
-              New
+              <IoAdd/>
             </button>
           </div>
           <div className="flex-1 overflow-y-auto subtle-scrollbar space-y-2">
             {notes.map((note, index) => (
               <div
                 key={note.id}
-                onClick={() => setMenuSelectedIndex(index)}
-                className={`w-full text-left p-2 rounded border transition-colors animate-[fadeup_200ms_${index * 10}ms_cubic-bezier(0.16,1,0.3,1)] ${
-                  index === menuSelectedIndex ? 'border-zinc-700 bg-zinc-900' : 'border-zinc-800 hover:bg-zinc-900'
+                role="button"
+                tabIndex={0}
+                onClick={() => {
+                  setActiveNoteId(note.id);
+                  setMenuSelectedIndex(index);
+                  setView('editor');
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    setActiveNoteId(note.id);
+                    setMenuSelectedIndex(index);
+                    setView('editor');
+                  }
+                }}
+                onFocus={() => setMenuSelectedIndex(index)}
+                className={`qn-note-row animate-[fadeup_200ms_${index * 10}ms_cubic-bezier(0.16,1,0.3,1)] ${
+                  index === menuSelectedIndex ? 'is-selected' : ''
                 }`}
               >
                 <div className="flex items-start justify-between gap-2">
-                  <button
-                    onClick={() => {
-                      setActiveNoteId(note.id);
-                      setView('editor');
-                    }}
-                    className="flex-1 text-left min-w-0"
-                  >
-                    <div className="text-sm text-zinc-200">{note.title}</div>
+                  <span className="flex-1 text-left min-w-0">
+                    <div className="text-sm text-zinc-200">{note.folder ? `${note.folder}/${note.title}` : note.title}</div>
                     <div className="text-xs text-zinc-500 truncate">
                       {(note.content || '').replace(/\s+/g, ' ').slice(0, 90) || 'Empty note'}
                     </div>
-                  </button>
+                  </span>
 
                   <button
+                    type="button"
                     onClick={(e) => {
                       e.stopPropagation();
                       deleteNote(note.id);
                     }}
-                    className="text-[10px] px-2 py-1 rounded border border-zinc-700 text-zinc-300 hover:bg-zinc-800"
+                    className="qn-icon-button qn-icon-button-small"
                     title="Delete note"
+                    aria-label={`Delete ${note.title}`}
                   >
-                    Del
+                    <IoTrash/>
                   </button>
                 </div>
               </div>
@@ -491,13 +885,11 @@ export default function App() {
               setNotes([]);
               setActiveNoteId(null);
               setMenuCmdOpen(false);
-              event.preventDefault();
               return;
             }
 
-            if (id === 'settheme') {
-              setThemePickerOpen(true);
-              event.preventDefault();
+            if (id === 'settings') {
+              openSettings('menu');
               return;
             }
 
@@ -516,62 +908,19 @@ export default function App() {
             }
           }}
         />
-
-        <CommandPalette
-          open={themePickerOpen}
-          setOpen={setThemePickerOpen}
-          commands={themeCommands}
-          title="Themes"
-          onCommand={(id) => {
-            if (id === 'theme:load-custom') {
-              themeInputRef.current?.click();
-              return;
-            }
-
-            if (!id.startsWith('theme:')) return;
-            const themeId = id.replace('theme:', '');
-            setTheme(themeId);
-            event.preventDefault();
-
-          }}
-        />
-
-        <input
-          ref={themeInputRef}
-          type="file"
-          accept=".json,.md,text/markdown,application/json,text/plain"
-          className="hidden"
-          onChange={async (event) => {
-            const file = event.target.files?.[0];
-            if (!file) return;
-
-            const text = await file.text();
-            const parsed = parseCustomThemeFromText(text, file.name.replace(/\.[^.]+$/, ''));
-            event.target.value = '';
-
-            if (!parsed) {
-              window.alert('Could not parse custom theme file. See docs/custom-themes.md for format.');
-              return;
-            }
-
-            setCustomTheme(parsed);
-            setTheme('custom');
-            setThemePickerOpen(false);
-          }}
-        />
       </div>
     );
   }
 
   return (
-    <div style={{ cursor: isHidden ? 'none' : 'auto' }} className="w-screen h-screen bg-zinc-950 text-zinc-100 font-mono p-0">
+    <div style={{ cursor: isHidden ? 'none' : 'auto' }} className="qn-editor-shell w-screen h-screen bg-zinc-950 text-zinc-100 p-0">
       <div className="h-full">
-        <Editor content={activeNote?.content || ''} setContent={setActiveContent} />
+        <Editor content={activeNote?.content || ''} setContent={setActiveContent} currentNote={activeNote} />
       </div>
 
       {renameOpen && (
         <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
-          <div className="w-full max-w-md rounded-2xl border border-zinc-700 bg-zinc-900 p-4">
+          <div className="qn-dialog w-full max-w-md border border-zinc-700 bg-zinc-900 p-4">
             <div className="text-sm text-zinc-200 mb-3">Rename note</div>
             <input
               ref={renameInputRef}
@@ -591,19 +940,19 @@ export default function App() {
                   focusEditor();
                 }
               }}
-              className="w-full bg-zinc-800 text-zinc-100 border border-zinc-700 p-2 rounded-md outline-none"
+              className="qn-input w-full bg-zinc-800 text-zinc-100 border border-zinc-700 p-2 outline-none"
               placeholder="Note title"
             />
             <div className="mt-3 flex items-center justify-end gap-2">
               <button
                 onClick={() => setRenameOpen(false)}
-                className="text-xs px-3 py-1.5 rounded border border-zinc-700 hover:bg-zinc-800"
+                className="qn-button text-xs"
               >
                 Cancel
               </button>
               <button
                 onClick={submitRename}
-                className="text-xs px-3 py-1.5 rounded border border-zinc-700 bg-zinc-800 hover:bg-zinc-700"
+                className="qn-button qn-button-primary text-xs"
               >
                 Save
               </button>
